@@ -1,4 +1,0 @@
-Hello dmwit, (ha you thought it would say hello world, well no). This is me testing
-how this works and figuring out where I should be adding files to. Yeah, it took me
-a while to find where to stick this, but if you can see this, it means I managed to
-do it \o/
