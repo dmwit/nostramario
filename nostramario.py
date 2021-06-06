@@ -1,10 +1,8 @@
 import collections
 import cv2
 import math
-import matplotlib.pyplot
 import numpy
 import sklearn.cluster
-import statistics
 import sys
 import Xlib.display
 import Xlib.ext.composite
@@ -132,7 +130,6 @@ def learn_grid_many(votes, chunks, m_lo, m_hi, b_lo, b_hi, n_m=100, n_b=1, n_onc
             (m1, b1) = learn_grid_once(votes, chunks, m0, b0, n_once, learning_rate)
             g = grid_goodness(votes, chunks, m1, b1)
             results.append((g, m1, b1))
-            # print('pixel = {m0:.2f}chunk + {b0:.2f} -> pixel = {m1:.2f}chunk + {b1:.2f} ({g:.2f})'.format(**locals()))
     results.sort()
     return results
 
@@ -154,67 +151,28 @@ def draw_grid(img, x_m, x_b, y_m, y_b):
 
 if __name__ == "__main__":
     fceux = find_fceux()
-
     img = screenshot_window(fceux)
-    # img = cv2.imread('dmhero.png')
+    # img = cv2.imread('input.png')
+
     img = cv2.resize(img, (256, 224))
 
+    # palettize the image
     clusterer = sklearn.cluster.KMeans(n_clusters=16)
     colors = numpy.reshape(img, (256*224, 3))
     clusterer.fit(colors)
-    #cs = clusterer.cluster_centers_
-
-    #mapping_ = clusterer.predict(sorted(cs, key=lambda x:numpy.sum(x*x)))
-    #mapping = {}
-    #for i, lbl in enumerate(mapping_): mapping[lbl] = i
-    #mapping = numpy.expand_dims(numpy.array([mapping[i] for i in range(len(cs))]), (0,))
-    #ordered_labels = numpy.reshape(numpy.take(mapping, clusterer.labels_), (224, 256))
-    #os = ordered_labels
-    os = numpy.reshape(clusterer.labels_, (224, 256))
-
-    # for i, color in enumerate(cs):
-    #     img = cv2.rectangle(img, (i*16, 0), (i*16+15, 15), color, -1)
-    # for i, color in enumerate(sorted(cs, key=lambda x:numpy.sum(x*x))):
-    #     img = cv2.rectangle(img, (i*16, 16), (i*16+15, 31), color, -1)
+    pimg = numpy.reshape(clusterer.labels_, (224, 256))
 
     votes = collections.defaultdict(lambda:0)
-    vote_for_grid_colors(votes, os)
-    vote_for_grid_colors(votes, numpy.transpose(os))
+    vote_for_grid_colors(votes, pimg)
+    vote_for_grid_colors(votes, numpy.transpose(pimg))
     svotes = sorted(votes.items(), key=lambda x:x[1])
     grid0 = svotes[-1][0]
     grid1 = svotes[-2][0]
-    cols = vote_for_grid_position(grid0, grid1, os)
-    rows = vote_for_grid_position(grid0, grid1, numpy.transpose(os))
-    # print((statistics.median(cols.values()), max(cols.values())))
-    # print((statistics.median(rows.values()), max(rows.values())))
-    # matplotlib.pyplot.bar(cols.keys(), cols.values())
-    # # matplotlib.pyplot.yscale('log')
-    # matplotlib.pyplot.show()
+    cols = vote_for_grid_position(grid0, grid1, pimg)
+    rows = vote_for_grid_position(grid0, grid1, numpy.transpose(pimg))
 
     (x_g, x_m, x_b) = learn_grid_many(cols, 32, 4, 12, 0, 0)[-1]
     (y_g, y_m, y_b) = learn_grid_many(rows, 28, 4, 12, 0, 0)[-1]
     (x_m, x_b) = learn_grid_once(cols, 32, x_m, x_b, 10000)
     (y_m, y_b) = learn_grid_once(rows, 28, y_m, y_b, 10000)
-    cv2.imshow('grid', draw_grid(img, x_m, x_b, y_m, y_b))
-
-    while cv2.waitKey(-1) == 32:
-        # cv2.imshow('img', img)
-        # cv2.imshow('labels', numpy.reshape(clusterer.labels_ / 15, (224, 256)))
-        # cv2.imshow('ordered labels', ordered_labels / 15)
-        # cv2.imshow('grayscale', numpy.sum(img, (2,))/768)
-        # cv2.imshow('votes', numpy.array(rgb))
-        # for i in range(100):
-        #     (dx_m, dx_b) = grid_goodness_derivative(cols, 32, x_m, x_b)
-        #     (dy_m, dy_b) = grid_goodness_derivative(rows, 28, y_m, y_b)
-        #     x_m = x_m + learning_rate * dx_m
-        #     x_b = x_b + learning_rate * dx_b
-        #     y_m = y_m + learning_rate * dy_m
-        #     y_b = y_b + learning_rate * dy_b
-        # x_g = grid_goodness(cols, 32, x_m, x_b)
-        # y_g = grid_goodness(rows, 28, y_m, y_b)
-        # print('x={x_m:.2f}[+{dx_m:.2f}]c + {x_b:.2f}[+{dx_b:.2f}] ({x_g:.2f}); y={y_m:.2f}[+{dy_m:.2f}]r + {y_b:.2f}[+{dy_b:.2f}] ({y_g:.2f})'.format(**locals()))
-        # cv2.imshow('grid', draw_grid(img, x_m, x_b, y_m, y_b))
-
-        (x_m, x_b) = learn_grid_once(cols, 32, x_m, x_b)
-        (y_m, y_b) = learn_grid_once(rows, 28, y_m, y_b)
-        cv2.imshow('grid', draw_grid(img, x_m, x_b, y_m, y_b))
+    cv2.imwrite('grid.png', draw_grid(img, x_m, x_b, y_m, y_b))
