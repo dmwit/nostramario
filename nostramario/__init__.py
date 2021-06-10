@@ -62,7 +62,7 @@ def parzen_derivative(x, L=4):
 
 class Params:
     def __init__(self, lo, hi, n):
-        self.bounds = Boundaries(lo, (hi - lo) / max(1, n-1))
+        self.bounds = Boundaries((hi - lo) / max(1, n-1), lo)
         self.n = n
 
     def lerp(self):
