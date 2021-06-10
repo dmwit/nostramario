@@ -68,6 +68,12 @@ class Params:
     def lerp(self):
         return (self.bounds(i) for i in range(self.n))
 
+    def __str__(self):
+        return '{} points along {}'.format(self.n, self.bounds)
+
+    def __repr__(self):
+        return 'Params({}, {}, {})'.format(repr(self.bounds(0)), repr(self.bounds(self.n-1)), repr(self.n))
+
 class Boundaries:
     def __init__(self, m, b):
         self.m = m
@@ -143,6 +149,12 @@ class Boundaries:
             cv2.line(img, (0, v), (max_coord_other, v), (255, 255, 0))
         return img
 
+    def __str__(self):
+        return 'y = {:.2f}*x + {:.2f}'.format(self.m, self.b)
+
+    def __repr__(self):
+        return 'Boundaries({}, {})'.format(repr(self.m), repr(self.b))
+
 class Grid:
     def __init__(self, img):
         simg = cv2.resize(img, (256, 224))
@@ -170,3 +182,10 @@ class Grid:
         img = self.x.draw(numpy.transpose(img, (1,0,2)))
         img = self.y.draw(numpy.transpose(img, (1,0,2)))
         return img
+
+    def __str__(self):
+        'x = {:.2f}*col + {:.2f}; y = {:.2f}*row + {:.2f}'.format(
+                self.x.m,
+                self.x.b,
+                self.y.m,
+                self.y.b)
