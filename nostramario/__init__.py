@@ -135,7 +135,9 @@ class Boundaries:
 
     def learn_from_img(self, img, grid0, grid1, chunks, n=100, L=4, learning_rate=1e-6):
         votes = vote_for_grid_position(img, grid0, grid1)
-        bounds = self.learn(votes, chunks, n, L, learning_rate).ascend_gradient(votes, chunks, 10000)
+        bounds = self.learn(votes, chunks, n, L, learning_rate).ascend_gradient(votes, chunks, 10000, L, learning_rate)
+        # TODO: Why do we need +1 for fceux, but +0.5 for the capture card test
+        # image? Why is +anything needed at all?
         bounds.b = math.fmod(bounds.b+1, bounds.m)
         return bounds
 
