@@ -158,27 +158,9 @@ class Boundaries:
         return 'Boundaries({}, {})'.format(repr(self.m), repr(self.b))
 
 class Grid:
-    def __init__(self, img):
-        simg = cv2.resize(img, (256, 224))
-
-        # palettize the image
-        clusterer = sklearn.cluster.KMeans(n_clusters=16)
-        colors = numpy.reshape(simg, (256*224, 3))
-        clusterer.fit(colors)
-        pimg = numpy.reshape(clusterer.labels_, (224, 256))
-
-        votes = collections.defaultdict(lambda:0)
-        vote_for_grid_colors(votes, pimg)
-        vote_for_grid_colors(votes, numpy.transpose(pimg))
-        svotes = sorted(votes.items(), key=lambda x:x[1])
-        grid0 = svotes[-1][0]
-        grid1 = svotes[-2][0]
-
-        params = Boundaries(Params(4, 12, 100), Params(0, 0, 1))
-        x_scale = img.shape[1] / pimg.shape[1]
-        y_scale = img.shape[0] / pimg.shape[0]
-        self.x = x_scale * params.learn_from_img(pimg, grid0, grid1, 32)
-        self.y = y_scale * params.learn_from_img(numpy.transpose(pimg), grid0, grid1, 28)
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
 
     def draw(self, img):
         img = self.x.draw(numpy.transpose(img, (1,0,2)))
@@ -186,8 +168,35 @@ class Grid:
         return img
 
     def __str__(self):
-        'x = {:.2f}*col + {:.2f}; y = {:.2f}*row + {:.2f}'.format(
+        return 'x = {:.2f}*col + {:.2f}; y = {:.2f}*row + {:.2f}'.format(
                 self.x.m,
                 self.x.b,
                 self.y.m,
                 self.y.b)
+
+    def __repr__(self):
+        return 'Grid({}, {})'.format(repr(self.x), repr(self.y))
+
+def learn_grid_from_img(img):
+    simg = cv2.resize(img, (256, 224))
+
+    # palettize the image
+    clusterer = sklearn.cluster.KMeans(n_clusters=16)
+    colors = numpy.reshape(simg, (256*224, 3))
+    clusterer.fit(colors)
+    pimg = numpy.reshape(clusterer.labels_, (224, 256))
+
+    votes = collections.defaultdict(lambda:0)
+    vote_for_grid_colors(votes, pimg)
+    vote_for_grid_colors(votes, numpy.transpose(pimg))
+    svotes = sorted(votes.items(), key=lambda x:x[1])
+    grid0 = svotes[-1][0]
+    grid1 = svotes[-2][0]
+
+    params = Boundaries(Params(4, 12, 100), Params(0, 0, 1))
+    x_scale = img.shape[1] / pimg.shape[1]
+    y_scale = img.shape[0] / pimg.shape[0]
+    return Grid \
+        ( x_scale * params.learn_from_img(pimg, grid0, grid1, 32)
+        , y_scale * params.learn_from_img(numpy.transpose(pimg), grid0, grid1, 28)
+        )

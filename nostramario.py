@@ -42,6 +42,6 @@ if __name__ == "__main__":
     img = screenshot_window(fceux)
     # img = cv2.imread('input.png')
 
-    grid = nostramario.Grid(img)
+    grid = nostramario.learn_grid_from_img(img)
     cv2.imshow('grid.png', grid.draw(img))
     cv2.waitKey(0)
