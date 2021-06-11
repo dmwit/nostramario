@@ -35,12 +35,12 @@ def vote_for_grid_position(arr, grid0, grid1):
             if label0 in grids: end[label0] = i
             other_label1 = grid_sum - label1
             if label1 in grids and other_label1 in end:
-                col = (end[other_label1] + i + 1) // 2
-                cols[col] = cols[col] + 1
+                col = (end[other_label1] + i + 1) / 2
+                cols[col] += 1
     return cols
 
-def integers_around(x, L):
-    return range(math.floor(x - L), math.ceil(x + L)+1)
+def half_integers_around(x, L):
+    return map(lambda x:x/2, range(2*math.floor(x - L), 2*math.ceil(x + L)+1))
 
 def parzen(x, L=4):
     absx = abs(x)
@@ -107,14 +107,14 @@ class Boundaries:
         return sum(parzen(window_center - x)*votes[x]
                    for c in range(chunks)
                    for window_center in [self(c)]
-                   for x in integers_around(window_center, L)
+                   for x in half_integers_around(window_center, L)
                   )
 
     def goodness_derivative(self, votes, chunks, L=4):
         return sum( (Boundaries(c*(d := parzen_derivative(window_center - x)*votes[x]), d)
                      for c in range(chunks)
                      for window_center in [self(c)]
-                     for x in integers_around(window_center, L)
+                     for x in half_integers_around(window_center, L)
                     )
                   , start = Boundaries(0, 0)
                   )
@@ -136,9 +136,7 @@ class Boundaries:
     def learn_from_img(self, img, grid0, grid1, chunks, n=100, L=4, learning_rate=1e-6):
         votes = vote_for_grid_position(img, grid0, grid1)
         bounds = self.learn(votes, chunks, n, L, learning_rate).ascend_gradient(votes, chunks, 10000, L, learning_rate)
-        # TODO: Why do we need +1 for fceux, but +0.5 for the capture card test
-        # image? Why is +anything needed at all?
-        bounds.b = math.fmod(bounds.b+1, bounds.m)
+        bounds.b = math.fmod(bounds.b, bounds.m)
         return bounds
 
     def draw(self, img):
@@ -147,7 +145,8 @@ class Boundaries:
         grids = math.ceil(max_coord_this/self.m)+1
         img = img.copy()
         for grid in range(grids):
-            v = round(self(grid))
+            # TODO: why is this +1 needed?
+            v = round(self(grid))+1
             cv2.line(img, (0, v), (max_coord_other, v), (255, 255, 0))
         return img
 
