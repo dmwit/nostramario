@@ -2,6 +2,7 @@ import collections
 import cv2
 import math
 import numpy
+import os.path
 import sklearn.cluster
 
 def interval_goodness(expected, actual):
@@ -102,6 +103,7 @@ class Boundaries:
         return self
 
     def __call__(self, x): return self.m*x + self.b
+    def ipoint(self, x): return round(self(x))
 
     def goodness(self, votes, chunks, L=4):
         return sum(parzen(window_center - x)*votes[x]
@@ -136,15 +138,16 @@ class Boundaries:
     def learn_from_img(self, img, grid0, grid1, chunks, n=100, L=4, learning_rate=1e-6):
         votes = vote_for_grid_position(img, grid0, grid1)
         bounds = self.learn(votes, chunks, n, L, learning_rate).ascend_gradient(votes, chunks, 10000, L, learning_rate)
-        bounds.b = math.fmod(bounds.b, bounds.m)
+        bounds.b %= bounds.m
         return bounds
+
+    def size(self, pixels): return math.ceil((pixels-self.b)/self.m)
 
     def draw(self, img):
         max_coord_this = img.shape[0]-1
         max_coord_other = img.shape[1]-1
-        grids = math.ceil(max_coord_this/self.m)+1
         img = img.copy()
-        for grid in range(grids):
+        for grid in range(self.size(max_coord_this)):
             # TODO: why is this +1 needed?
             v = round(self(grid))+1
             cv2.line(img, (0, v), (max_coord_other, v), (255, 255, 0))
@@ -160,6 +163,9 @@ class Grid:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+
+    def __call__(self, x, y): return (self.x(x), self.y(y))
+    def ipoint(self, x, y): return (self.x.ipoint(x), self.y.ipoint(y))
 
     def draw(self, img):
         img = self.x.draw(numpy.transpose(img, (1,0,2)))
@@ -199,3 +205,38 @@ def learn_grid_from_img(img):
         ( x_scale * params.learn_from_img(pimg, grid0, grid1, 32)
         , y_scale * params.learn_from_img(numpy.transpose(pimg), grid0, grid1, 28)
         )
+
+class Template:
+    def __init__(self, img, w, h):
+        self._img = img
+        self._w = w
+        self._h = h
+        self._cache = {}
+
+    def match_single(self, img, grid, c, r):
+        (tlx, tly) = grid.ipoint(c, r)
+        (brx, bry) = grid.ipoint(c+self._w, r+self._h)
+        w = brx - tlx
+        h = bry - tly
+        cv2size = (w, h)
+        shape = (h, w, self._img.shape[2])
+        if cv2size not in self._cache:
+            simg = cv2.resize(self._img, cv2size)
+            if self._img.shape[2] > 3:
+                mask = numpy.array(simg[:,:,3])
+                simg = numpy.array(simg[:,:,:3])
+            else:
+                mask = 255*numpy.ones((h,w,1))
+            self._cache[cv2size] = (mask, simg)
+        mask, template = self._cache[cv2size]
+        return cv2.matchTemplate \
+            ( img[tly:bry, tlx:brx, :]
+            , template
+            , cv2.TM_CCORR_NORMED
+            , mask
+            )[0,0]
+
+def load_template(path, sprite_size=8):
+    img = cv2.imread(os.path.join("templates", path), cv2.IMREAD_UNCHANGED)
+    h, w = img.shape[0:2]
+    return Template(img, w//sprite_size, h//sprite_size)

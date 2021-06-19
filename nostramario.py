@@ -40,8 +40,22 @@ def screenshot_window(win):
 if __name__ == "__main__":
     fceux = find_fceux()
     img = screenshot_window(fceux)
+    grid = nostramario.Grid \
+        ( nostramario.Boundaries(23.95, 22.52)
+        , nostramario.Boundaries(23.97,  4.01)
+        )
     # img = cv2.imread('input.png')
+    # grid = nostramario.Grid \
+    #     ( nostramario.Boundaries(41.74, 34.15)
+    #     , nostramario.Boundaries(39.23,  2.05)
+    #     )
 
-    grid = nostramario.learn_grid_from_img(img)
+    # grid = nostramario.learn_grid_from_img(img)
+    template = nostramario.load_template("progress-box.png")
+    matches = numpy.zeros((14, 23))
+    for x in range(23):
+        for y in range(14):
+            matches[y,x] = template.match_single(img, grid, x, y)
     cv2.imshow('grid.png', grid.draw(img))
+    cv2.imshow('matches', matches)
     cv2.waitKey(0)
