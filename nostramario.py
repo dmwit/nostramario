@@ -1,4 +1,5 @@
 import cv2
+import math
 import nostramario
 import numpy
 import sys
@@ -38,15 +39,25 @@ def screenshot_window(win):
     return numpy.frombuffer(img, dtype=numpy.uint8).reshape(h, w, 4)[:, :, :3]
 
 if __name__ == "__main__":
-    fceux = find_fceux()
+    #fceux = find_fceux()
+    vidcap = cv2.VideoCapture('input.mp4')
 
     while True:
-        img = screenshot_window(fceux)
+        #img = screenshot_window(fceux)
         #img = cv2.imread('input.png')
-        g = nostramario.learn_grid_from_img(img)
+        success, img = vidcap.read()
+        if not success: break
 
-        gridded = g.draw(img)
-        cv2.imshow('original', img)
+        try:
+            g = nostramario.learn_grid_from_img(img)
+        except:
+            gridded = img
+        else:
+            gridded = g.draw(img)
+
         cv2.imshow('processed', gridded)
 
-        if cv2.waitKey(-1) != 32: break
+        millis = 1
+        #millis = math.floor(1000/vidcap.get(cv2.CAP_PROP_FPS))
+        # q to quit
+        if cv2.waitKey(millis) == 113: break
