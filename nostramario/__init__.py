@@ -1,79 +1,8 @@
-import collections
 import cv2
 import math
 import numpy
 import os.path
-import sklearn.cluster
-
-def interval_goodness(expected, actual):
-    return math.pow(2/3, 10*abs(1-actual/expected))
-
-def transitions(row):
-    for i in range(row.shape[0]-1):
-        label0 = row[i]
-        label1 = row[i+1]
-        if label0 == label1: continue
-        yield (i, label0, label1)
-
-def vote_for_grid_colors(votes, arr):
-    for row in arr:
-        start = {row[0]: 0}
-        run = {}
-        for i, label0, label1 in transitions(row):
-            if label0 in start:
-                run[label0] = i - start[label0]
-            if label1 in start:
-                votes[label1] = votes[label1] + interval_goodness(8, run[label1])*interval_goodness(16, i+1-start[label1])
-            start[label1] = i+1
-
-def vote_for_grid_position(arr, grid0, grid1):
-    cols = collections.defaultdict(lambda:0)
-    grids = [grid0, grid1]
-    grid_sum = grid0+grid1
-    for row in arr:
-        end = {}
-        for i, label0, label1 in transitions(row):
-            if label0 in grids: end[label0] = i
-            other_label1 = grid_sum - label1
-            if label1 in grids and other_label1 in end:
-                col = (end[other_label1] + i + 1) / 2
-                cols[col] += 1
-    return cols
-
-def half_integers_around(x, L):
-    return map(lambda x:x/2, range(2*math.floor(x - L), 2*math.ceil(x + L)+1))
-
-def parzen(x, L=4):
-    absx = abs(x)
-    if absx < L/2:
-        v = x/L
-        return 1+6*v*v*(abs(v)-1)
-    elif absx < L:
-        return 2*(1-absx/L)**3
-    else: return 0
-
-def parzen_derivative(x, L=4):
-    absx = abs(x)
-    if absx < L/2:
-        return 12*x*(1.5*absx/L - 1)/(L*L)
-    elif absx < L:
-        v = 1-absx/L
-        return 6*v*v*(v-1)/x
-    else: return 0
-
-class Params:
-    def __init__(self, lo, hi, n):
-        self.bounds = Boundaries((hi - lo) / max(1, n-1), lo)
-        self.n = n
-
-    def lerp(self):
-        return (self.bounds(i) for i in range(self.n))
-
-    def __str__(self):
-        return '{} points along {}'.format(self.n, self.bounds)
-
-    def __repr__(self):
-        return 'Params({}, {}, {})'.format(repr(self.bounds(0)), repr(self.bounds(self.n-1)), repr(self.n))
+import statistics
 
 class Boundaries:
     def __init__(self, m, b):
@@ -104,43 +33,6 @@ class Boundaries:
 
     def __call__(self, x): return self.m*x + self.b
     def ipoint(self, x): return round(self(x))
-
-    def goodness(self, votes, chunks, L=4):
-        return sum(parzen(window_center - x)*votes[x]
-                   for c in range(chunks)
-                   for window_center in [self(c)]
-                   for x in half_integers_around(window_center, L)
-                  )
-
-    def goodness_derivative(self, votes, chunks, L=4):
-        return sum( (Boundaries(c*(d := parzen_derivative(window_center - x)*votes[x]), d)
-                     for c in range(chunks)
-                     for window_center in [self(c)]
-                     for x in half_integers_around(window_center, L)
-                    )
-                  , start = Boundaries(0, 0)
-                  )
-
-    def ascend_gradient(self, votes, chunks, n=100, L=4, learning_rate=1e-6):
-        for i in range(n):
-            self += learning_rate * self.goodness_derivative(votes, chunks, L)
-        return self
-
-    def learn(self, votes, chunks, n=100, L=4, learning_rate=1e-6):
-        return max \
-            ( (Boundaries(m, b).ascend_gradient(votes, chunks, n, L, learning_rate)
-               for m in self.m.lerp()
-               for b in self.b.lerp()
-              )
-            , key=lambda x:x.goodness(votes, chunks, L)
-            )
-
-    def learn_from_img(self, img, grid0, grid1, chunks, n=100, L=4, learning_rate=1e-6):
-        votes = vote_for_grid_position(img, grid0, grid1)
-        bounds = self.learn(votes, chunks, n, L, learning_rate).ascend_gradient(votes, chunks, 10000, L, learning_rate)
-        bounds.b %= bounds.m
-        return bounds
-
     def size(self, pixels): return math.ceil((pixels-self.b)/self.m)
 
     def draw(self, img):
@@ -148,10 +40,12 @@ class Boundaries:
         max_coord_other = img.shape[1]-1
         img = img.copy()
         for grid in range(self.size(max_coord_this)):
-            # TODO: why is this +1 needed?
-            v = round(self(grid))+1
+            v = self.ipoint(grid)
             cv2.line(img, (0, v), (max_coord_other, v), (255, 255, 0))
         return img
+
+    def normalize_b(self):
+        self.b -= self.m*math.floor(self.b/self.m)
 
     def __str__(self):
         return 'y = {:.2f}*x + {:.2f}'.format(self.m, self.b)
@@ -182,28 +76,88 @@ class Grid:
     def __repr__(self):
         return 'Grid({}, {})'.format(repr(self.x), repr(self.y))
 
+def is_peak(hist, min_peak, i):
+    return hist[i] > min_peak and (i == 0 or i == hist.size-1 or (hist[i] >= hist[i-1] and hist[i] >= hist[i+1]))
+
+def find_squares(img):
+    h, w, _ = img.shape
+    kernel_size = 2*round((h+w)/600)+1
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # First, we try to find the color black and whatever the second darkest
+    # color is, so we can put the threshold between those two. We'll say that
+    # any sufficiently high "peaks" (local maxima, including endpoints) qualify
+    # as a color.
+    brightness_hist = cv2.calcHist([gray], [0], None, [256], [0, 255])
+    min_peak = numpy.sum(brightness_hist)/128 # twice the average count seems to rule out local maxima I don't care about
+    for i in range(256):
+        if is_peak(brightness_hist, min_peak, i):
+            first_peak = i
+            break
+    else: raise Exception("no sufficiently high peaks")
+    second_peak = first_peak+1
+    while brightness_hist[second_peak] == brightness_hist[first_peak]:
+        if second_peak == 255: break
+        second_peak = second_peak+1
+    for i in range(second_peak, 256):
+        if is_peak(brightness_hist, min_peak, i):
+            second_peak = i
+            break
+    else: raise Exception("only one sufficiently high peak")
+
+    # Now do a simple thresholding and find contours. Simple thresholding
+    # should be okay because I don't think lighting plays a part in any of the
+    # video streams we care about for now. If that changes in the future we
+    # will need to revisit this.
+    _, bw = cv2.threshold(gray, math.ceil((first_peak + second_peak)/2), 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Pick out the contours that are "square-like". They're "square-like" if
+    # they almost fill their axis-aligned bounding box (we don't handle
+    # rotations here for now) and if their aspect ratio is pretty close to 1.
+    # But we let the aspect ratio be pretty lax, because some people play with
+    # settings that make the boxes have a more different aspect ratio.
+    squares = []
+    for contour in contours:
+        rect = cv2.boundingRect(contour)
+        rx, ry, rw, rh = rect
+        area = cv2.contourArea(contour)
+        if 0 in [rw, rh, area]: continue
+        if rw*rh/area < 1.3 and max(rw,rh)/min(rw,rh) < 1.4 and rx>0 and ry>0 and rx+rw<=w and ry+rh<=h:
+            squares.append(rect)
+
+    return squares
+
+def learn_boundaries_from_intervals(xws, threshold=0.2, rates=[0.1, 0.1, 0.1]):
+    w = statistics.mode(w for _, w in xws)
+    lo = w*(1-threshold)
+    hi = w*(1+threshold)
+    xs = [x for x, w in xws if w >= lo and w <= hi]
+    ws = [w for x, w in xws if w >= lo and w <= hi]
+    xs.sort()
+    b = Boundaries(statistics.mean(ws), statistics.mode(xs))
+    b.normalize_b()
+
+    for rate in rates:
+        # learn m
+        for x in xs:
+            dx = x-b.b
+            i = round(dx/b.m)
+            if i!= 0: b.m += rate*(dx/i-b.m)
+
+        # learn b
+        dxb = 0
+        for x in xs:
+            dxb += x-b(round((x-b.b)/b.m))
+        b.b += dxb/len(xs)
+
+    return b
+
 def learn_grid_from_img(img):
-    simg = cv2.resize(img, (256, 224))
-
-    # palettize the image
-    clusterer = sklearn.cluster.KMeans(n_clusters=16)
-    colors = numpy.reshape(simg, (256*224, 3))
-    clusterer.fit(colors)
-    pimg = numpy.reshape(clusterer.labels_, (224, 256))
-
-    votes = collections.defaultdict(lambda:0)
-    vote_for_grid_colors(votes, pimg)
-    vote_for_grid_colors(votes, numpy.transpose(pimg))
-    svotes = sorted(votes.items(), key=lambda x:x[1])
-    grid0 = svotes[-1][0]
-    grid1 = svotes[-2][0]
-
-    params = Boundaries(Params(4, 12, 100), Params(0, 0, 1))
-    x_scale = img.shape[1] / pimg.shape[1]
-    y_scale = img.shape[0] / pimg.shape[0]
-    return Grid \
-        ( x_scale * params.learn_from_img(pimg, grid0, grid1, 32)
-        , y_scale * params.learn_from_img(numpy.transpose(pimg), grid0, grid1, 28)
+    squares = find_squares(img)
+    return Grid(
+        learn_boundaries_from_intervals([(x, w) for x, _, w, _ in squares]),
+        learn_boundaries_from_intervals([(y, h) for _, y, _, h in squares])
         )
 
 class Template:
