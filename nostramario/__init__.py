@@ -8,38 +8,18 @@ class Boundaries:
     def __init__(self, m, b):
         self.m = m
         self.b = b
-
-    # Adding lines is a bit odd, conceptually. We will typically use this when
-    # one of the arguments represents some parameters we're learning, and the
-    # other represents partial derivatives of the goodness function for those
-    # parameters.
-    def __add__(self, other):
-        return Boundaries(self.m + other.m, self.b + other.b)
-
-    def __iadd__(self, other):
-        self.m += other.m
-        self.b += other.b
-        return self
-
-    def __mul__(self, other):
-        return Boundaries(self.m * other, self.b * other)
-
-    __rmul__ = __mul__
-
-    def __imul__(self, other):
-        self.m *= other
-        self.b *= other
-        return self
+        self.normalize_b()
 
     def __call__(self, x): return self.m*x + self.b
     def ipoint(self, x): return round(self(x))
     def size(self, pixels): return math.ceil((pixels-self.b)/self.m)
+    def range(self, pixels): return range(self.size(pixels))
 
     def draw(self, img):
         max_coord_this = img.shape[0]-1
         max_coord_other = img.shape[1]-1
         img = img.copy()
-        for grid in range(self.size(max_coord_this)):
+        for grid in self.range(max_coord_this):
             v = self.ipoint(grid)
             cv2.line(img, (0, v), (max_coord_other, v), (255, 255, 0))
         return img
@@ -60,6 +40,13 @@ class Grid:
 
     def __call__(self, x, y): return (self.x(x), self.y(y))
     def ipoint(self, x, y): return (self.x.ipoint(x), self.y.ipoint(y))
+    def size(self, x, y): return (self.x.size(x), self.y.size(y))
+    def range(self, img_or_shape):
+        try:
+            h, w = img_or_shape.shape[0:2]
+        except AttributeError:
+            w, h = img_or_shape
+        return ((x, y) for x in self.x.range(w) for y in self.y.range(h))
 
     def draw(self, img):
         img = self.x.draw(numpy.transpose(img, (1,0,2)))
@@ -136,7 +123,6 @@ def learn_boundaries_from_intervals(xws, threshold=0.2, rates=[0.1, 0.1, 0.1]):
     ws = [w for x, w in xws if w >= lo and w <= hi]
     xs.sort()
     b = Boundaries(statistics.mean(ws), statistics.mode(xs))
-    b.normalize_b()
 
     for rate in rates:
         # learn m
@@ -170,10 +156,16 @@ class Template:
     def match_single(self, img, grid, c, r):
         (tlx, tly) = grid.ipoint(c, r)
         (brx, bry) = grid.ipoint(c+self._w, r+self._h)
+        # we want to resize the template to the grid size, not the size of the
+        # slice of the image we get, so it's important we use this computation
+        # rather than asking for the shape of the subimage
         w = brx - tlx
         h = bry - tly
         cv2size = (w, h)
         shape = (h, w, self._img.shape[2])
+        # any completely-black patches result in division by zero, so ensure there are none
+        img = numpy.maximum(img[tly:bry, tlx:brx, :], 1)
+        if 0 in img.shape: return 0
         if cv2size not in self._cache:
             simg = cv2.resize(self._img, cv2size)
             if self._img.shape[2] > 3:
@@ -183,12 +175,7 @@ class Template:
                 mask = 255*numpy.ones((h,w,1))
             self._cache[cv2size] = (mask, simg)
         mask, template = self._cache[cv2size]
-        return cv2.matchTemplate \
-            ( img[tly:bry, tlx:brx, :]
-            , template
-            , cv2.TM_CCORR_NORMED
-            , mask
-            )[0,0]
+        return cv2.matchTemplate(img, template, cv2.TM_CCORR_NORMED, mask)[0,0]
 
 def load_template(path, sprite_size=8):
     img = cv2.imread(os.path.join("templates", path), cv2.IMREAD_UNCHANGED)
