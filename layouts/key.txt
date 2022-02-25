@@ -1,0 +1,26 @@
+a clip tl                A                        0 0
+b clip t                 B                        1
+c clip tr                C C                      2 0, 1, 2
+d clip bl                D D                      3 crown tl, no crown tl
+e clip b                 E E                      4 crown tr, no crown tr
+f clip br                F VIRUS RU               5 crown bl, no crown bl
+g VIRUS V                G VIRUS US               6 crown br, no crown br
+h VIRUS VI               H VIRUS S                7
+i VIRUS IR               I I                      8 0, 1, 2, 3, 4, 5, 6, 7, 8
+j color grid space       J                        9 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+k black grid space       K                        ? other garbage
+l neck tl                L L                      ^ bottle lid
+m neck bl                M                        - bottle t, bottle b
+n neck br                N                        _ bottle backdrop
+o neck tr                O O                      | bottle l, bottle r
+p playfield              P P                      ` bottle bl
+q clipboard tl           Q                        , bottle br
+r clipboard t            R R                      / bottle tl
+s clipboard tr           S S                      \ bottle tr
+t clipboard l            T T                      @ 2
+u clipboard background   U U                      * the top row is LEVEL, but offset by half a grid space to the right; the next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
+v clipboard r            V V
+w clipboard bl           W
+x clipboard b            X L, M, clipboard backdrop
+y clipboard br           Y H, E, O
+z                        Z D, I, W

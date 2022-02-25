@@ -1,0 +1,35 @@
+kjkjkjkjkjkjkjkjkjkjkjkjkjkjkjkj
+jkjkjkjkjkjqrrabbcrrskjkjkjkjkjk
+kjkjkjkjkjkt1Pdeef@Pvjkjkjkjkjkj
+jkjkjkjkjkjtu******uvkjkjkjkjkjk
+kjkjk^____^tu******uv^____^jkjkj
+jkjkj|kkkk|tu******uv|kkkk|kjkjk
+kjkjklmkknotXYZuuXYZvlmkknojkjkj
+jkjkjk|kk|jwxxxxxxxxyk|kk|jkjkjk
+kjk/--,__`--\jabbck/--,__`--\jkj
+jkj|pppppppp|udeefu|pppppppp|kjk
+kjk|pppppppp|uuuuuu|pppppppp|jkj
+jkj|pppppppp|u3434u|pppppppp|kjk
+kjk|pppppppp|u5656u|pppppppp|jkj
+jkj|pppppppp|u3434u|pppppppp|kjk
+kjk|pppppppp|u5656u|pppppppp|jkj
+jkj|pppppppp|u3434u|pppppppp|kjk
+kjk|pppppppp|u5656u|pppppppp|jkj
+jkj|pppppppp|uuuuuu|pppppppp|kjk
+kjk|pppppppp|xxxxxx|pppppppp|jkj
+jkj|pppppppp|kjkjkj|pppppppp|kjk
+kjk|pppppppp|ghiFGH|pppppppp|jkj
+jkj|pppppppp|qracrs|pppppppp|kjk
+kjk|pppppppp|tudfut|pppppppp|jkj
+jkj|pppppppp|t****t|pppppppp|kjk
+kjk|pppppppp|wxxxxy|pppppppp|jkj
+jkj`--------,kjkjkj`--------,kjk
+kjkjkjkjkjkjkjkjkjkjkjkjkjkjkjkj
+jkjkjkjkjkjkjkjkjkjkjkjkjkjkjkjk
+
+lookahead at 7-8, 5.5 and 23-24, 5.5
+
+* is special:
+	* top row is LEVEL, but offset by half a grid space to the right
+	* next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
+	* last row is 89 offset left two pixels, then a special jammed-together vu, then 89 offset right two pixels
