@@ -69,14 +69,14 @@ if __name__ == "__main__":
     vidcap = cv2.VideoCapture('input.mp4')
 
     colors = "bry"
-    shapes = ["x1", "x2"] + [c for c in "lrov^"]
+    shapes = ["x1", "x2"] + [c for c in "lr*v^"]
     digits = ['k' + str(d) for d in [' '] + list(range(10))]
-    templates = {
-        nm: nostramario.load_template(nm + ".png")
+    templates = nostramario.load_templates(
+        (nm, nm + ".png")
         for nm in
             digits +
             [color + shape for color in colors for shape in shapes]
-        }
+        )
 
     millis = 1
     #millis = math.floor(1000/vidcap.get(cv2.CAP_PROP_FPS))
@@ -95,15 +95,12 @@ if __name__ == "__main__":
         except: k = cv2.waitKey(millis)
         else:
             for x, y in g.range(img):
-                maxWeight = -1
-                for nm, tmpl in templates.items():
-                    weight = tmpl.match_single(img, g, x, y)
-                    if weight > maxWeight:
-                        maxWeight = weight
-                        match = nm
-                processed = indicate_match(processed, match, g.ipoint(x, y), g.ipoint(x+1, y+1))
-                k = cv2.waitKey(millis)
+                if templates.match(img, g, x, y).shape != (32,):
+                    print(x, y, templates.match(img, g, x, y).shape)
+                #processed = indicate_match(processed, match, g.ipoint(x, y), g.ipoint(x+1, y+1))
+                k = cv2.waitKey(0)
                 if k == 113: break
             else:
                 #cv2.imwrite('output.png', processed)
                 cv2.imshow('processed', processed)
+            if k != 113: k = cv2.waitKey(millis)

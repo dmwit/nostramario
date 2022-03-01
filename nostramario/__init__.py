@@ -146,14 +146,18 @@ def learn_grid_from_img(img):
         learn_boundaries_from_intervals([(y, h) for _, y, _, h in squares])
         )
 
-class Template:
-    def __init__(self, img, w, h):
-        self._img = img
+class TemplateLibrary:
+    def __init__(self, labeled_tmpls, w, h):
+        self._labels, self._tmpls = list(zip(*labeled_tmpls))
         self._w = w
         self._h = h
         self._cache = {}
 
-    def match_single(self, img, grid, c, r):
+    def labels(): return list(self._labels)
+
+    def match(self, img, grid, c, r):
+        if not self._tmpls: return []
+
         (tlx, tly) = grid.ipoint(c, r)
         (brx, bry) = grid.ipoint(c+self._w, r+self._h)
         # we want to resize the template to the grid size, not the size of the
@@ -162,22 +166,39 @@ class Template:
         w = brx - tlx
         h = bry - tly
         cv2size = (w, h)
-        shape = (h, w, self._img.shape[2])
-        # any completely-black patches result in division by zero, so ensure there are none
-        img = numpy.maximum(img[tly:bry, tlx:brx, :], 1)
-        if 0 in img.shape: return 0
-        if cv2size not in self._cache:
-            simg = cv2.resize(self._img, cv2size)
-            if self._img.shape[2] > 3:
-                mask = numpy.array(simg[:,:,3])
-                simg = numpy.array(simg[:,:,:3])
-            else:
-                mask = 255*numpy.ones((h,w,1))
-            self._cache[cv2size] = (mask, simg)
-        mask, template = self._cache[cv2size]
-        return cv2.matchTemplate(img, template, cv2.TM_CCORR_NORMED, mask)[0,0]
+        img = img[max(0,tly):bry, max(0,tlx):brx, :]
+        if 0 in img.shape: return [0 for _ in self._tmpls]
 
-def load_template(path, sprite_size=8):
-    img = cv2.imread(os.path.join("templates", path), cv2.IMREAD_UNCHANGED)
-    h, w = img.shape[0:2]
-    return Template(img, w//sprite_size, h//sprite_size)
+        if cv2size not in self._cache:
+            stmpls = []
+            masks = []
+            match_everywhere = 255*numpy.ones((h,w))
+
+            for tmpl in self._tmpls:
+                stmpl = cv2.resize(tmpl, cv2size)
+                if stmpl.shape[2] > 3:
+                    masks.append(numpy.array(stmpl[:,:,3]))
+                    stmpls.append(numpy.array(stmpl[:,:,:3]))
+                else:
+                    masks.append(match_everywhere)
+                    stmpls.append(stmpl)
+
+            mask = numpy.concatenate(masks)
+            stmpl = numpy.concatenate(stmpls)
+            self._cache[cv2size] = (mask, stmpl)
+        else: mask, stmpl = self._cache[cv2size]
+
+        return cv2.matchTemplate(img, stmpl, cv2.TM_SQDIFF_NORMED, mask)[0::h,0]
+
+def load_templates(labeled_paths, sprite_size=8):
+    labeled_paths = list(labeled_paths) # if it's a generator, realize it, because we want to iterate over it twice
+    imgs = [cv2.imread(os.path.join("templates", path), cv2.IMREAD_UNCHANGED) for _, path in labeled_paths]
+    h, w = imgs[0].shape[0:2]
+
+    if w % sprite_size != 0 or h % sprite_size != 0:
+        raise Exception('templates are not a nice round multiple of sprite size')
+
+    if [img.shape[0:2] for img in imgs] != [(h, w) for _ in imgs]:
+        raise Exception('mismatched template shapes')
+
+    return TemplateLibrary([(label, img) for (label, _), img in zip(labeled_paths, imgs)], w//sprite_size, h//sprite_size)
