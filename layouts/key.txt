@@ -10,17 +10,17 @@ i VIRUS IR               I I                      8 0, 1, 2, 3, 4, 5, 6, 7, 8
 j color grid space       J                        9 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 k black grid space       K                        ? other garbage
 l neck tl                L L                      ^ bottle lid
-m neck bl                M                        - bottle t, bottle b
-n neck br                N                        _ bottle backdrop
-o neck tr                O O                      | bottle l, bottle r
-p playfield              P P                      ` bottle bl
-q clipboard tl           Q                        , bottle br
-r clipboard t            R R                      / bottle tl
-s clipboard tr           S S                      \ bottle tr
-t clipboard l            T T                      @ 2
-u clipboard background   U U                      * the top row is LEVEL, but offset by half a grid space to the right; the next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
-v clipboard r            V V
-w clipboard bl           W
+m neck bl                M                        - bottle t
+n neck br                N                        = bottle b
+o neck tr                O O                      _ bottle backdrop
+p playfield              P P                      | bottle l
+q clipboard tl           Q                        ! bottle r
+r clipboard t            R R                      ` bottle bl
+s clipboard tr           S S                      , bottle br
+t clipboard l            T T                      / bottle tl
+u clipboard background   U U                      \ bottle tr
+v clipboard r            V V                      @ 2
+w clipboard bl           W                        * the top row is LEVEL, but offset by half a grid space to the right; the next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
 x clipboard b            X L, M, clipboard backdrop
 y clipboard br           Y H, E, O
 z                        Z D, I, W
