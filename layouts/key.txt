@@ -1,26 +1,75 @@
-a clip tl                A                        0 0
-b clip t                 B                        1
-c clip tr                C C                      2 0, 1, 2
-d clip bl                D D                      3 crown tl, no crown tl
-e clip b                 E E                      4 crown tr, no crown tr
-f clip br                F VIRUS RU               5 crown bl, no crown bl
-g VIRUS V                G VIRUS US               6 crown br, no crown br
-h VIRUS VI               H VIRUS S                7
-i VIRUS IR               I I                      8 0, 1, 2, 3, 4, 5, 6, 7, 8
-j color grid space       J                        9 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-k black grid space       K                        ? other garbage
-l neck tl                L L                      ^ bottle lid
-m neck bl                M                        - bottle t
-n neck br                N                        = bottle b
-o neck tr                O O                      _ bottle backdrop
-p playfield              P P                      | bottle l
-q clipboard tl           Q                        ! bottle r
-r clipboard t            R R                      ` bottle bl
-s clipboard tr           S S                      , bottle br
-t clipboard l            T T                      / bottle tl
-u clipboard background   U U                      \ bottle tr
-v clipboard r            V V                      @ 2
-w clipboard bl           W                        * the top row is LEVEL, but offset by half a grid space to the right; the next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
-x clipboard b            X L, M, clipboard backdrop
-y clipboard br           Y H, E, O
-z                        Z D, I, W
+a clip-tl
+b clip-t
+c clip-tr
+d clip-bl
+e clip-b
+f clip-br
+g VIRUS-V
+h VIRUS-VI
+i VIRUS-IR
+j special: color grid space
+k k 
+l neck-tl
+m neck-bl
+n neck-br
+o neck-tr
+p special: playfield
+q clipboard-tl
+r clipboard-t
+s clipboard-tr
+t clipboard-l
+u clipboard-background
+v clipboard-r
+w clipboard-bl
+x clipboard-b
+y clipboard-br
+z
+A
+B
+C kc
+D kd
+E ke
+F VIRUS-RU
+G VIRUS-US
+H VIRUS-S
+I ki
+J
+K
+L kl
+M
+N
+O ko
+P kp
+Q
+R kr
+S ks
+T kt
+U ku
+V kv
+W
+X kl,km,clipboard-backdrop
+Y kh,ke,ko
+Z kd,ki,kw
+0 k0
+1
+2 k0,k1,k2
+3 crown-tl1,crown-tl2,no-crown-tl1,no-crown-tl2
+4 crown-tr1,crown-tr2,no-crown-tr1,no-crown-tr2
+5 crown-bl1,crown-bl2,no-crown-bl1,no-crown-bl2
+6 crown-br1,crown-br2,no-crown-br1,no-crown-br2
+7
+8 k0,k1,k2,k3,k4,k5,k6,k7,k8
+9 k0,k1,k2,k3,k4,k5,k6,k7,k8,k9
+? special: other garbage
+^ bottle-lid
+- bottle-t
+= bottle-b
+_ bottle-backdrop
+| bottle-l
+! bottle-r
+` bottle-bl
+, bottle-br
+/ bottle-tl
+\ bottle-tr
+@ k2
+* special: see comments in each file for more

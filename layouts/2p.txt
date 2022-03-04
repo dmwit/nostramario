@@ -27,9 +27,10 @@ jkj`========,kjkjkj`========,kjk
 kjkjkjkjkjkjkjkjkjkjkjkjkjkjkjkj
 jkjkjkjkjkjkjkjkjkjkjkjkjkjkjkjk
 
-lookahead at 7-8, 5.5 and 23-24, 5.5
+lookahead at 7-8, 5.5
+lookahead at 23-24, 5.5
 
-* is special:
-	* top row is LEVEL, but offset by half a grid space to the right
-	* next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
-	* last row is 89 offset left two pixels, then a special jammed-together vu, then 89 offset right two pixels
+# meaning of * in this file:
+# 	* top row is LEVEL, but offset by half a grid space to the right
+# 	* next two rows are 29u29, but offset by half a grid space to the right and half a grid space down
+# 	* last row is 89 offset left two pixels, then a special jammed-together vu, then 89 offset right two pixels
