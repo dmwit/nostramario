@@ -12,8 +12,13 @@ class Boundaries:
 
     def __call__(self, x): return self.m*x + self.b
     def ipoint(self, x): return round(self(x))
-    def size(self, pixels): return math.ceil((pixels-self.b)/self.m)
+    def size(self, pixels): return math.ceil(self.to_coord(pixels))
     def range(self, pixels): return range(self.size(pixels))
+
+    def to_coord(self, pixels): return (pixels-self.b)/self.m
+    def floor(self, pixels): return math.floor(self.to_coord(pixels))
+    def ceil(self, pixels): return math.ceil(self.to_coord(pixels))
+    def round(self, pixels): return round(self.to_coord(pixels))
 
     def draw(self, img):
         max_coord_this = img.shape[0]-1
@@ -33,6 +38,10 @@ class Boundaries:
     def __repr__(self):
         return 'Boundaries({}, {})'.format(repr(self.m), repr(self.b))
 
+    def __eq__(self, other):
+        try: return self is other or (self.m == other.m and self.b == other.b)
+        except AttributeError: return NotImplemented
+
 class Grid:
     def __init__(self, x, y):
         self.x = x
@@ -48,6 +57,11 @@ class Grid:
             w, h = img_or_shape
         return ((x, y) for x in self.x.range(w) for y in self.y.range(h))
 
+    def to_coord(self, x_pixels, y_pixels): return (self.x.to_coord(x_pixels), self.y.to_coord(y_pixels))
+    def floor(self, x_pixels, y_pixels): return (self.x.floor(x_pixels), self.y.floor(y_pixels))
+    def ceil(self, x_pixels, y_pixels): return (self.x.ceil(x_pixels), self.y.ceil(y_pixels))
+    def round(self, x_pixels, y_pixels): return (self.x.round(x_pixels), self.y.round(y_pixels))
+
     def draw(self, img):
         img = self.x.draw(numpy.transpose(img, (1,0,2)))
         img = self.y.draw(numpy.transpose(img, (1,0,2)))
@@ -62,6 +76,10 @@ class Grid:
 
     def __repr__(self):
         return 'Grid({}, {})'.format(repr(self.x), repr(self.y))
+
+    def __eq__(self, other):
+        try: return self is other or (self.x == other.x and self.y == other.y)
+        except AttributeError: return NotImplemented
 
 def is_peak(hist, min_peak, i):
     return hist[i] > min_peak and (i == 0 or i == hist.size-1 or (hist[i] >= hist[i-1] and hist[i] >= hist[i+1]))
@@ -147,58 +165,112 @@ def learn_grid_from_img(img):
         )
 
 class TemplateLibrary:
-    def __init__(self, labeled_tmpls, w, h):
-        self._labels, self._tmpls = list(zip(*labeled_tmpls))
-        self._w = w
-        self._h = h
-        self._cache = {}
+    def __init__(self, labeled_tmpls):
+        self._labels, tmpls = list(zip(*labeled_tmpls))
+        self._g = None
+        self._g_trunc = None
+        self._clear_cache()
 
-    def labels(): return list(self._labels)
+        self._tmpls = []
+        self._masks = []
+        for tmpl in tmpls:
+            if tmpl.shape[2] > 3:
+                self._tmpls.append(numpy.array(tmpl[:,:,:3]))
+                self._masks.append(numpy.array(tmpl[:,:,[3]]))
+            else:
+                self._tmpls.append(tmpl)
+                self._masks.append(255*numpy.ones((tmpl.shape[0], tmpl.shape[1], 1), dtype=numpy.uint8))
 
-    def match(self, img, grid, c, r):
-        if not self._tmpls: return []
+    def labels(self): return list(self._labels)
 
-        (tlx, tly) = grid.ipoint(c, r)
-        (brx, bry) = grid.ipoint(c+self._w, r+self._h)
-        # we want to resize the template to the grid size, not the size of the
-        # slice of the image we get, so it's important we use this computation
-        # rather than asking for the shape of the subimage
-        w = brx - tlx
-        h = bry - tly
-        cv2size = (w, h)
-        img = img[max(0,tly):bry, max(0,tlx):brx, :]
-        if 0 in img.shape: return [0 for _ in self._tmpls]
+    def set_grid(self, g):
+        if self._g == g: return
+        self._g = g
+        self._g_trunc = Grid(Boundaries(g.x.m, 0), Boundaries(g.y.m, 0))
+        self._clear_cache()
 
-        if cv2size not in self._cache:
-            stmpls = []
-            masks = []
-            match_everywhere = 255*numpy.ones((h,w))
+    def _clear_cache(self):
+        self._cache_size = (-1, -1)
+        self._cache_stmpls = None
+        self._cache_smasks = None
+        self._cache_strengths = None
+        self._cache_w = None
+        self._cache_h = None
 
-            for tmpl in self._tmpls:
-                stmpl = cv2.resize(tmpl, cv2size)
-                if stmpl.shape[2] > 3:
-                    masks.append(numpy.array(stmpl[:,:,3]))
-                    stmpls.append(numpy.array(stmpl[:,:,:3]))
-                else:
-                    masks.append(match_everywhere)
-                    stmpls.append(stmpl)
+    def match(self, img):
+        img = self._setup(img)
+        return self._strength(self._cache_stmpls-img)/numpy.sqrt(self._cache_strengths*self._strength(img))
 
-            mask = numpy.concatenate(masks)
-            stmpl = numpy.concatenate(stmpls)
-            self._cache[cv2size] = (mask, stmpl)
-        else: mask, stmpl = self._cache[cv2size]
+    def _setup(self, img):
+        tlx_coord, tly_coord = self._g.ceil(0, 0)
+        brx_coord, bry_coord = self._g.floor(img.shape[1], img.shape[0])
+        tlx_pixel, tly_pixel = self._g.ipoint(tlx_coord, tly_coord)
 
-        return cv2.matchTemplate(img, stmpl, cv2.TM_SQDIFF_NORMED, mask)[0::h,0]
+        # This is a bit subtle. It could be that the pixel size of the grid in
+        # self._g and self._g_trunc are off by one compared to one another.
+        # Since we're going to use _g_trunc for everything from here on, we
+        # need the size to match its specs, but since only _g tells us where to
+        # look in the original image we need the absolute top left to match its
+        # specs.
+        brx_pixel, bry_pixel = (tlx_pixel + self._g_trunc.x.ipoint(brx_coord-tlx_coord)
+                               ,tly_pixel + self._g_trunc.y.ipoint(bry_coord-tly_coord)
+                               )
+        img = img[tly_pixel:bry_pixel, tlx_pixel:brx_pixel, :]
+        self._cache_w = brx_coord - tlx_coord
+        self._cache_h = bry_coord - tly_coord
 
-def load_templates(labeled_paths, sprite_size=8):
+        if img.shape != self._cache_size:
+            scalings = {}
+            h, w, c = img.shape
+            n = len(self._tmpls)
+            self._cache_size = img.shape
+            self._cache_stmpls = numpy.zeros((n, h, w, c), dtype=numpy.int32)
+            self._cache_smasks = numpy.zeros((n, h, w, 1), dtype=numpy.int32)
+            self._cache_regions = numpy.zeros((self._cache_w, self._cache_h, h, w), dtype=numpy.int32)
+
+            for x_coord in range(self._cache_w):
+                for y_coord in range(self._cache_h):
+                    single_tlx_pixel, single_tly_pixel = self._g_trunc.ipoint(x_coord, y_coord)
+                    single_brx_pixel, single_bry_pixel = self._g_trunc.ipoint(x_coord+1, y_coord+1)
+
+                    x_pixel_range = slice(single_tlx_pixel, single_brx_pixel)
+                    y_pixel_range = slice(single_tly_pixel, single_bry_pixel)
+                    w = single_brx_pixel - single_tlx_pixel
+                    h = single_bry_pixel - single_tly_pixel
+                    scale = (w, h)
+
+                    if scale not in scalings:
+                        stmpl = numpy.array([cv2.resize(tmpl, scale) for tmpl in self._tmpls], dtype=numpy.int32)
+                        smask = numpy.array([cv2.resize(mask, scale) for mask in self._masks], dtype=numpy.uint8)
+                        scalings[scale] = (stmpl, smask)
+
+                    stmpl, smask = scalings[scale]
+                    self._cache_stmpls[:, y_pixel_range, x_pixel_range, :] = stmpl
+                    self._cache_smasks[:, y_pixel_range, x_pixel_range, 0] = smask
+                    self._cache_regions[x_coord, y_coord, y_pixel_range, x_pixel_range] = numpy.ones((h, w))
+
+            self._cache_strengths = self._strength(self._cache_stmpls).astype(numpy.float64)
+
+        return img
+
+    def _strength(self, imgs):
+        # doing imgs*smasks first implicitly casts imgs from uint8 to int32 if
+        # necessary, because smasks is int32
+        pixel_strengths = numpy.sum(imgs*(imgs*self._cache_smasks), axis=3)
+        out = numpy.zeros((self._cache_w, self._cache_h, pixel_strengths.shape[0]), dtype=numpy.int32)
+        for x in range(self._cache_w):
+            x_slice = slice(self._g_trunc.x.ipoint(x), self._g_trunc.x.ipoint(x+1))
+            for y in range(self._cache_h):
+                y_slice = slice(self._g_trunc.y.ipoint(y), self._g_trunc.y.ipoint(y+1))
+                out[x,y,:] = numpy.sum(pixel_strengths[:, y_slice, x_slice], axis=(1,2))
+        return out
+
+def load_templates(labeled_paths):
     labeled_paths = list(labeled_paths) # if it's a generator, realize it, because we want to iterate over it twice
     imgs = [cv2.imread(os.path.join("templates", path), cv2.IMREAD_UNCHANGED) for _, path in labeled_paths]
     h, w = imgs[0].shape[0:2]
 
-    if w % sprite_size != 0 or h % sprite_size != 0:
-        raise Exception('templates are not a nice round multiple of sprite size')
-
     if [img.shape[0:2] for img in imgs] != [(h, w) for _ in imgs]:
         raise Exception('mismatched template shapes')
 
-    return TemplateLibrary([(label, img) for (label, _), img in zip(labeled_paths, imgs)], w//sprite_size, h//sprite_size)
+    return TemplateLibrary([(label, img) for (label, _), img in zip(labeled_paths, imgs)])

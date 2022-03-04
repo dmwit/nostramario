@@ -65,8 +65,8 @@ def indicate_match(img, match, tl, br):
     return img
 
 if __name__ == "__main__":
-    #fceux = find_fceux()
-    vidcap = cv2.VideoCapture('input.mp4')
+    fceux = find_fceux()
+    #vidcap = cv2.VideoCapture('input.mp4')
 
     colors = "bry"
     shapes = ["x1", "x2"] + [c for c in "lr*v^"]
@@ -82,25 +82,32 @@ if __name__ == "__main__":
     #millis = math.floor(1000/vidcap.get(cv2.CAP_PROP_FPS))
     k = cv2.waitKey(millis)
     # q to quit
+    i = 0
     while k != 113:
-        #img = screenshot_window(fceux)
+        img = screenshot_window(fceux)
         #img = cv2.imread('input.png')
-        success, img = vidcap.read()
-        if not success: break
+        #success, img = vidcap.read()
+        #if not success: break
 
         processed = numpy.array(img)
 
+        i += 1
         try:
             g = nostramario.learn_grid_from_img(img)
         except: k = cv2.waitKey(millis)
         else:
-            for x, y in g.range(img):
-                if templates.match(img, g, x, y).shape != (32,):
-                    print(x, y, templates.match(img, g, x, y).shape)
-                #processed = indicate_match(processed, match, g.ipoint(x, y), g.ipoint(x+1, y+1))
-                k = cv2.waitKey(0)
-                if k == 113: break
-            else:
-                #cv2.imwrite('output.png', processed)
-                cv2.imshow('processed', processed)
+            templates.set_grid(g)
+            print(templates.match(img).shape)
+            cv2.imshow('original', img)
+            cv2.imshow('processed', processed)
+            print(i)
+#            for x, y in g.range(img):
+#                if templates.match(img, g, x, y).shape != (32,):
+#                    print(x, y, templates.match(img, g, x, y).shape)
+#                #processed = indicate_match(processed, match, g.ipoint(x, y), g.ipoint(x+1, y+1))
+#                k = cv2.waitKey(0)
+#                if k == 113: break
+#            else:
+#                #cv2.imwrite('output.png', processed)
+#                cv2.imshow('processed', processed)
             if k != 113: k = cv2.waitKey(millis)
