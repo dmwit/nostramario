@@ -9,10 +9,10 @@ h VIRUS-VI
 i VIRUS-IR
 j special: color grid space
 k k 
-l neck-tl
-m neck-bl
-n neck-br
-o neck-tr
+l bottle-neck-tl
+m bottle-neck-bl
+n bottle-neck-br
+o bottle-neck-tr
 p special: playfield
 q clipboard-tl
 r clipboard-t
@@ -47,21 +47,22 @@ T kt
 U ku
 V kv
 W
-X kl,km,clipboard-backdrop
+X kl,km,clipboard-background
 Y kh,ke,ko
 Z kd,ki,kw
 0 k0
 1
 2 k0,k1,k2
-3 crown-tl1,crown-tl2,no-crown-tl1,no-crown-tl2
-4 crown-tr1,crown-tr2,no-crown-tr1,no-crown-tr2
-5 crown-bl1,crown-bl2,no-crown-bl1,no-crown-bl2
-6 crown-br1,crown-br2,no-crown-br1,no-crown-br2
+3 crown-tl1,crown-tl2,no-crown-tl
+4 crown-tr1,crown-tr2,no-crown-tr
+5 crown-bl1,crown-bl2,no-crown-bl
+6 crown-br1,crown-br2,no-crown-br
 7
 8 k0,k1,k2,k3,k4,k5,k6,k7,k8
 9 k0,k1,k2,k3,k4,k5,k6,k7,k8,k9
 ? special: other garbage
-^ bottle-lid
+( bottle-opening-l
+) bottle-opening-r
 - bottle-t
 = bottle-b
 _ bottle-backdrop
