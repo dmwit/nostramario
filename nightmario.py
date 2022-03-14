@@ -8,12 +8,19 @@ from dataclasses import dataclass
 from os import path
 from typing import Dict, List, Optional, Set, Tuple
 
-@dataclass
+@dataclass(frozen=True)
 class Position:
     x: int
     y: int
 
-@dataclass
+    def __mul__(self, other): return Position(self.x*other, self.y*other)
+    __rmul__ = __mul__
+
+    def __add__(self, other):
+        return Position(self.x + other.x, self.y + other.y)
+    __radd__ = __add__
+
+@dataclass(frozen=True)
 class ImageLayer:
     pos: Position
     learn: bool
@@ -25,7 +32,7 @@ class ImageLayer:
     def onehot_ranges(self, offset):
         return [slice_size(offset, len(self.images))] if self.learn else []
 
-@dataclass
+@dataclass(frozen=True)
 class Image:
     image: numpy.ndarray
     mask: numpy.ndarray
@@ -49,30 +56,93 @@ class TemplateCache:
                 mask = numpy.minimum(1, image[:, :, [3]])
                 image = image[:, :, 0:3]*mask
             else:
-                mask = numpy.ones((img.shape[0], img.shape[1], 1), dtype=numpy.uint8)
+                mask = numpy.ones((image.shape[0], image.shape[1], 1), dtype=numpy.uint8)
             self._images[filename] = (result := Image(image, mask))
             return result
 
-@dataclass
+@dataclass(frozen=True)
+class Cell:
+    color: int
+    shape: int
+
+    BLUE = 0
+    RED = 1
+    YELLOW = 2
+    NUM_COLORS = 3
+
+    EMPTY = 0
+    VIRUS = 1
+    LEFT = 2
+    RIGHT = 3
+    UP = 4
+    DOWN = 5
+    DISCONNECTED = 6
+    CLEARING = 7
+    NUM_SHAPES = 8
+
+    _COLOR_CHARS = "bry"
+    _SHAPE_CHARS = " xlr^v*o"
+
+    def __post_init__(self):
+        if self.color not in range(Cell.NUM_COLORS):
+            print(f'WARNING: Creating cell with nonstandard color {self.color}.', file=sys.stderr)
+        if self.shape not in range(Cell.NUM_SHAPES):
+            print(f'WARNING: Creating cell with nonstandard shape {self.shape}.', file=sys.stderr)
+        # For equality testing to work right, we want to make sure empty cells
+        # have a consistent "color". But since we set frozen=True in the
+        # dataclass declaration, we can't just write self.color = 0.
+        # See also: https://stackoverflow.com/questions/53756788/
+        if self.shape == Cell.EMPTY: object.__setattr__(self, 'color', 0)
+
+    def onehot_ranges(self, offset):
+        ranges = [slice_size(offset + Cell.NUM_COLORS, Cell.NUM_SHAPES)]
+        if self.shape != Cell.EMPTY:
+            ranges.append(slice_size(offset, Cell.NUM_COLORS))
+        return ranges
+
+    def template_name(self, frame_parity):
+        if self.shape == Cell.EMPTY: return 'k .png'
+        extra = frame_parity+1 if self.shape == Cell.VIRUS else ''
+        return f'{Cell._COLOR_CHARS[self.color]}{Cell._SHAPE_CHARS[self.shape]}{extra}.png'
+
+@dataclass(frozen=True)
 class Playfield:
     pos: Position
     w: int
     h: int
 
-    _NUM_SHAPES = 8 # virus, left pill half, right pill half, upper pill half, lower pill half, disconnected pill half, clearing, empty
-    _NUM_COLORS = 3 # blue, red, yellow
-    _PARAMETERS_PER_POSITION = 8+3 # Playfield._NUM_SHAPES + Playfield._NUM_COLORS
+    _PARAMETERS_PER_POSITION = Cell.NUM_SHAPES + Cell.NUM_COLORS
 
     def parameter_count(self):
         return self.w*self.h*Playfield._PARAMETERS_PER_POSITION
 
-    def onehot_ranges(self, offset):
-        return ([]
-            + [slice_size(offset + Playfield._PARAMETERS_PER_POSITION*i, Playfield._NUM_SHAPES) for i in range(w*h)]
-            + [slice_size(offset + Playfield._PARAMETERS_PER_POSITION*i + Playfield._NUM_SHAPES, Playfield._NUM_COLORS) for i in range(w*h)]
-            )
+    def render(self):
+        empty = Cell(Cell.BLUE, Cell.EMPTY)
+        cells = {}
 
-@dataclass
+        max_height = random.randrange(self.h//4) + self.h*5//8
+        virus_count = random.randrange(self.w*max_height*7//8)
+        positions_remaining = self.w*max_height
+        for x in range(self.w):
+            for y in range(self.h-max_height, self.h):
+                n = random.randrange(positions_remaining)
+                if n < virus_count:
+                    colors = list(range(Cell.NUM_COLORS))
+                    try: colors.remove(cells[Position(x-2,y)].color)
+                    except KeyError: pass # position was out of bounds or the cell was empty
+                    try: colors.remove(cells[Position(x,y-2)].color)
+                    except KeyError: pass
+                    except ValueError: pass # tried to remove the same color twice
+                    cells[Position(x,y)] = Cell(random.choice(colors), Cell.VIRUS)
+                    virus_count -= 1
+                positions_remaining -= 1
+
+        return cells
+
+    def parameter_offset(self, pos):
+        return Playfield._PARAMETERS_PER_POSITION * (pos.y*self.w + pos.x)
+
+@dataclass(frozen=True)
 class Scene:
     name: List[str]
     index: int
@@ -95,6 +165,22 @@ class Scene:
             index = random.randrange(num_images)
             if layer.learn: parameters[index+offset] = 1
             cache.load(layer.images[index]).at(image, layer.pos)
+
+        EMPTY_CELL = Cell(Cell.BLUE, Cell.EMPTY)
+        frame_parity = random.randrange(2)
+        for offset, playfield in self.playfields:
+            cells = playfield.render()
+            for y in range(playfield.h):
+                for x in range(playfield.w):
+                    pos = Position(x,y)
+
+                    cell = cells.get(pos, EMPTY_CELL)
+                    pos_offset = offset + playfield.parameter_offset(pos)
+
+                    slices += cell.onehot_ranges(pos_offset)
+                    parameters[pos_offset + cell.color] = 1
+                    parameters[pos_offset + Cell.NUM_COLORS + cell.shape] = 1
+                    cache.load(cell.template_name(frame_parity)).at(image, playfield.pos + 8*pos)
 
         return TrainingExample(image, parameters, slices, self.alternative_indices)
 
@@ -166,7 +252,7 @@ class SceneTree:
 
         return index
 
-@dataclass
+@dataclass(frozen=True)
 class TrainingExample:
     image: numpy.ndarray
     classification: numpy.ndarray
