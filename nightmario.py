@@ -105,6 +105,8 @@ class Cell:
         extra = frame_parity+1 if self.shape == Cell.VIRUS else ''
         return f'{Cell._COLOR_CHARS[self.color]}{Cell._SHAPE_CHARS[self.shape]}{extra}.png'
 
+EMPTY_CELL = Cell(Cell.BLUE, Cell.EMPTY)
+
 # Information about the bottle, you know, the 8x16 grid of viruses and pills
 # and stuff.
 @dataclass(frozen=True)
@@ -119,11 +121,11 @@ class Playfield:
         return self.w*self.h*Playfield._PARAMETERS_PER_POSITION
 
     def render(self):
-        empty = Cell(Cell.BLUE, Cell.EMPTY)
         cells = {}
 
+        # add some viruses
         max_height = random.randrange(self.h//4) + self.h*5//8
-        virus_count = random.randrange(self.w*max_height*7//8)
+        virus_count = (original_virus_count := 1 + random.randrange(self.w*max_height*7//8))
         positions_remaining = self.w*max_height
         for x in range(self.w):
             for y in range(self.h-max_height, self.h):
@@ -135,14 +137,64 @@ class Playfield:
                     try: colors.remove(cells[Position(x,y-2)].color)
                     except KeyError: pass
                     except ValueError: pass # tried to remove the same color twice
+                    # since there are three colors to start with, and we only
+                    # called remove twice, there's guaranteed to be something
+                    # left in colors
                     cells[Position(x,y)] = Cell(random.choice(colors), Cell.VIRUS)
                     virus_count -= 1
                 positions_remaining -= 1
+
+        # clear some viruses... but not all of them
+        clear_columns = set(range(self.w)).difference(pos.x for pos in cells)
+        if clear_columns:
+            def key(pos): return (-abs(self.h - max_height//3 - pos.y), abs(self.w//2 - pos.x))
+        else:
+            def key(pos): return (pos.y, abs(self.w//2 - pos.x))
+        remaining_viruses = sorted(cells, key=key)
+        try:
+            for _ in range(random.randrange(max(1, original_virus_count - 1))):
+                while True: # in ideal math-land, this loop executes just once on average (!)
+                    i = int(random.triangular(0, len(remaining_viruses), 0))
+                    if i < len(remaining_viruses): break
+                del cells[remaining_viruses[i]]
+                del remaining_viruses[i]
+        except ValueError as e:
+            if e.args != ('empty range for randrange()',): raise e
+
+        # put some junk on the bottom row if we're near the end of a level
+        clear_columns = set(range(self.w)).difference(pos.x for pos in cells)
+        if clear_columns:
+            bottoms = {x: self.h-1 for x in range(self.w) if Position(x, self.h-1) not in cells}
+            for _ in range(int(random.gammavariate(3, 2))):
+                if not bottoms: break
+                x, y = random.choice(list(bottoms.items()))
+                if colors := non_clearing_colors(cells, pos := Position(x,y)):
+                    cells[pos] = Cell(random.choice(colors), Cell.DISCONNECTED)
+                    if y > 0 and (pos := Position(x, y-1)) not in cells:
+                        bottoms[x] = y-1
+                    else: del bottoms[x]
+                else: del bottoms[x]
 
         return cells
 
     def parameter_offset(self, pos):
         return Playfield._PARAMETERS_PER_POSITION * (pos.y*self.w + pos.x)
+
+def non_clearing_colors(cells, pos):
+    return [color for color in range(Cell.NUM_COLORS) if max_run(cells, pos, color) < 4]
+
+def max_run(cells, pos, color):
+    lengths = [run_length(cells, pos, color, direction) for direction in [Position(-1, 0), Position(1, 0), Position(0, -1), Position(0, 1)]]
+    return 1+max(lengths[0]+lengths[1], lengths[2]+lengths[3])
+
+def run_length(cells, pos, color, direction):
+    n = 0
+    while True:
+        pos += direction
+        cell = cells.get(pos, EMPTY_CELL)
+        if cell.color != color or cell.shape == Cell.EMPTY: break
+        n += 1
+    return n
 
 # A scene is a collection of instructions for creating a random training
 # example. Instructions are nested when in a SceneTree, but in Scene all the
@@ -338,8 +390,8 @@ def filter_artifacts(image):
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
 
+cache = TemplateCache()
 while cv2.waitKey(1000) != 113:
-    cache = TemplateCache()
     for scene in t.flatten():
         example = scene.render(cache)
         name = ' '.join(scene.name)
