@@ -105,6 +105,8 @@ class Cell:
         extra = frame_parity+1 if self.shape == Cell.VIRUS else ''
         return f'{Cell._COLOR_CHARS[self.color]}{Cell._SHAPE_CHARS[self.shape]}{extra}.png'
 
+# Information about the bottle, you know, the 8x16 grid of viruses and pills
+# and stuff.
 @dataclass(frozen=True)
 class Playfield:
     pos: Position
@@ -142,6 +144,10 @@ class Playfield:
     def parameter_offset(self, pos):
         return Playfield._PARAMETERS_PER_POSITION * (pos.y*self.w + pos.x)
 
+# A scene is a collection of instructions for creating a random training
+# example. Instructions are nested when in a SceneTree, but in Scene all the
+# tree traversal is already done, and instructions from enclosing parts of the
+# tree are already included.
 @dataclass(frozen=True)
 class Scene:
     name: List[str]
@@ -184,6 +190,7 @@ class Scene:
 
         return TrainingExample(image, parameters, slices, self.alternative_indices)
 
+# the raw data, as close to the directly parsed form as possible
 @dataclass
 class SceneTree:
     background: Optional[str]
@@ -256,7 +263,11 @@ class SceneTree:
 class TrainingExample:
     image: numpy.ndarray
     classification: numpy.ndarray
+    # each slice is an independent classification problem, so should be part of
+    # its own cross-correlation calculation
     onehot_ranges: List[slice]
+    # the scene identifiers aren't necessarily contiguous, so there's one final
+    # classification problem in an arbitrary collection of indices
     onehot_indices: List[int]
 
 def slice_size(start, length): return slice(start, start+length)
