@@ -313,19 +313,23 @@ def split_indentation(line):
     match = SPACE_REGEX.fullmatch(line)
     return (match.group(1), match.group(2) or '')
 
+def filter_artifacts(image):
+    failures = []
+    if random.randrange(2): failures += [cv2.IMWRITE_JPEG_QUALITY, 10 + random.randrange(60)]
+    if random.randrange(2): failures += [cv2.IMWRITE_JPEG_LUMA_QUALITY, 10 + random.randrange(60)]
+    if random.randrange(2): failures += [cv2.IMWRITE_JPEG_CHROMA_QUALITY, 10 + random.randrange(60)]
+    success, encoded = cv2.imencode('.jpg', image, failures)
+    assert(success)
+    image = cv2.imdecode(encoded, cv2.IMREAD_UNCHANGED)
+    assert(any(x > 1 for x in image.shape))
+    return image
+
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
 
-print(t.parameter_count(), t.scene_parameters())
-for scene in t.flatten(): print(scene)
-
-while cv2.waitKey(100000) != 113:
+while cv2.waitKey(1000) != 113:
     cache = TemplateCache()
     for scene in t.flatten():
         example = scene.render(cache)
         name = ' '.join(scene.name)
-        print(name)
-        print(numpy.nonzero(example.classification))
-        print(example.onehot_ranges)
-        print(example.onehot_indices)
-        cv2.imshow(' '.join(scene.name), example.image)
+        cv2.imshow(' '.join(scene.name), filter_artifacts(example.image))
