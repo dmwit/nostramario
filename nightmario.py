@@ -1,8 +1,10 @@
 import cv2
 import dataclasses
+import itertools
 import numpy
 import random
 import re
+import sys
 
 from dataclasses import dataclass
 from os import path
@@ -19,6 +21,11 @@ class Position:
     def __add__(self, other):
         return Position(self.x + other.x, self.y + other.y)
     __radd__ = __add__
+
+Position.LEFT = Position(-1, 0)
+Position.RIGHT = Position(1, 0)
+Position.UP = Position(0, -1)
+Position.DOWN = Position(0, 1)
 
 @dataclass(frozen=True)
 class ImageLayer:
@@ -65,22 +72,10 @@ class Cell:
     color: int
     shape: int
 
-    BLUE = 0
-    RED = 1
-    YELLOW = 2
-    NUM_COLORS = 3
-
-    EMPTY = 0
-    VIRUS = 1
-    LEFT = 2
-    RIGHT = 3
-    UP = 4
-    DOWN = 5
-    DISCONNECTED = 6
-    CLEARING = 7
-    NUM_SHAPES = 8
-
+    BLUE, RED, YELLOW, NUM_COLORS = range(4)
     _COLOR_CHARS = "bry"
+
+    EMPTY, VIRUS, LEFT, RIGHT, UP, DOWN, DISCONNECTED, CLEARING, NUM_SHAPES = range(9)
     _SHAPE_CHARS = " xlr^v*o"
 
     def __post_init__(self):
@@ -175,7 +170,88 @@ class Playfield:
                     else: del bottoms[x]
                 else: del bottoms[x]
 
+        # put some pills and stuff
+        # made this typo three times in a row. this is my life now
+        falling = not random.randrange(5) # can stuff be in midair?
+        i = int(random.gammavariate(1,3) if falling else random.gammavariate(2.5, 3.5))
+        attemptys = 0
+        while i>0 and attemptys<1000:
+            attemptys += 1
+
+            # choose the position and shape
+            bottom_left = Position(random.randrange(self.w), random.randrange(self.h))
+            kind = random.randrange(4)
+            support = [bottom_left + Position.DOWN]
+            occupancy = [bottom_left]
+            if kind < 2: # disconnected
+                shapes = [Cell.DISCONNECTED]
+            elif kind < 3: # horizontal
+                if bottom_left.x == self.w-1: continue
+                support.append(bottom_left + Position.DOWN + Position.RIGHT)
+                occupancy.append(bottom_left + Position.RIGHT)
+                shapes = [Cell.LEFT, Cell.RIGHT]
+            elif kind < 4: # vertical
+                occupancy.append(bottom_left + Position.UP)
+                shapes = [Cell.DOWN, Cell.UP]
+                if bottom_left.y == 0:
+                    shapes = [Cell.DISCONNECTED]
+                    del occupancy[1]
+            else: raise Exception(f'strange kind {kind} while generating detritus')
+
+            # double check that the chosen position is empty and, if gravity
+            # should be settled, that the chosen position is supported
+            if any(pos in cells for pos in occupancy): continue
+            if not falling and all(pos not in cells for pos in support): continue
+
+            # choose the colors; bias towards colors that work towards a clear
+            # TODO: think about how to be a bit less stupidly inefficient here
+            colors = list(itertools.product(*([]
+                + 12*self.neighboring_colors(cells, pos)
+                + 3*self.neighboring_colors(cells, pos, skip=1)
+                + list(range(Cell.NUM_COLORS))
+                for pos in occupancy)))
+
+            if not falling:
+                # make sure we don't pick colors that should be cleared,
+                # because we're not in "unsettled" mode
+                new_colors = []
+                for choice in colors:
+                    for j, pos in enumerate(occupancy):
+                        cells[pos] = Cell(choice[j], shapes[j])
+                    if all(choice[j] in non_clearing_colors(cells, pos) for j, pos in enumerate(occupancy)):
+                        new_colors.append(choice)
+                for pos in occupancy: del cells[pos]
+                colors = new_colors
+            if not colors: continue
+            colors = random.choice(colors)
+
+            for j, pos in enumerate(occupancy):
+                cells[pos] = Cell(colors[j], shapes[j])
+
+            i -= 1
+
         return cells
+
+    def neighboring_colors(self, cells, pos, skip=0):
+        colors = []
+        for direction in [Position.LEFT, Position.RIGHT, Position.DOWN, Position.UP]:
+            head = pos
+            for _ in range(skip+1):
+                while True:
+                    head += direction
+                    if not self.in_bounds(head): break
+                    if cells.get(head, EMPTY_CELL) != EMPTY_CELL: break
+
+                color = cells.get(head, EMPTY_CELL).color
+                count = 0
+                while self.in_bounds(head) and cells.get(head, EMPTY_CELL).color == color:
+                    head += direction
+                    count += 1
+            colors += count*[color]
+        return colors
+
+    def in_bounds(self, pos):
+        return pos.x >= 0 and pos.y >= 0 and pos.x < self.w and pos.y < self.h
 
     def parameter_offset(self, pos):
         return Playfield._PARAMETERS_PER_POSITION * (pos.y*self.w + pos.x)
@@ -184,7 +260,7 @@ def non_clearing_colors(cells, pos):
     return [color for color in range(Cell.NUM_COLORS) if max_run(cells, pos, color) < 4]
 
 def max_run(cells, pos, color):
-    lengths = [run_length(cells, pos, color, direction) for direction in [Position(-1, 0), Position(1, 0), Position(0, -1), Position(0, 1)]]
+    lengths = [run_length(cells, pos, color, direction) for direction in [Position.LEFT, Position.RIGHT, Position.UP, Position.DOWN]]
     return 1+max(lengths[0]+lengths[1], lengths[2]+lengths[3])
 
 def run_length(cells, pos, color, direction):
