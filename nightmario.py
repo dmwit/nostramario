@@ -22,10 +22,14 @@ class Position:
         return Position(self.x + other.x, self.y + other.y)
     __radd__ = __add__
 
+    def __neg__(self): return Position(-self.x, -self.y)
+    def __sub__(self, other): return Position(self.x - other.x, self.y - other.y)
+
 Position.LEFT = Position(-1, 0)
 Position.RIGHT = Position(1, 0)
 Position.UP = Position(0, -1)
 Position.DOWN = Position(0, 1)
+Position.EVERY_WHICH_WAY = (Position.LEFT, Position.RIGHT, Position.UP, Position.DOWN)
 
 @dataclass(frozen=True)
 class ImageLayer:
@@ -96,7 +100,7 @@ class Cell:
         return ranges
 
     def template_name(self, frame_parity):
-        if self.shape == Cell.EMPTY: return 'k .png'
+        if self.shape == Cell.EMPTY: return 'transparent_pixel.png'
         extra = frame_parity+1 if self.shape == Cell.VIRUS else ''
         return f'{Cell._COLOR_CHARS[self.color]}{Cell._SHAPE_CHARS[self.shape]}{extra}.png'
 
@@ -113,7 +117,7 @@ class Playfield:
     _PARAMETERS_PER_POSITION = Cell.NUM_SHAPES + Cell.NUM_COLORS
 
     def parameter_count(self):
-        return self.w*self.h*Playfield._PARAMETERS_PER_POSITION
+        return self.w*(self.h+1)*Playfield._PARAMETERS_PER_POSITION
 
     def render(self):
         cells = {}
@@ -179,7 +183,7 @@ class Playfield:
             attemptys += 1
 
             # choose the position and shape
-            bottom_left = Position(random.randrange(self.w), random.randrange(self.h))
+            bottom_left = self.random_position()
             kind = random.randrange(4)
             support = [bottom_left + Position.DOWN]
             occupancy = [bottom_left]
@@ -230,11 +234,77 @@ class Playfield:
 
             i -= 1
 
+        # if stuff isn't falling, maybe put a floating pill (that's being
+        # player-controlled) or mark some clears on-screen
+        if not falling:
+            # 1/2/6 clears/nothing/pill
+            extras = random.randrange(9)
+            if extras < 1: # mark some clears
+                pos = self.random_position()
+                max_lengths = {
+                        Position.LEFT: pos.x+1,
+                        Position.RIGHT: self.w-pos.x,
+                        Position.DOWN: self.h-pos.y,
+                        Position.UP: pos.y+1,
+                    }
+                direction = random.choice([direction for direction, length in max_lengths.items() if length >= 4])
+                boundary = mark_random_clear(cells, pos, direction, min(6, max_lengths[direction]))
+
+                for i in range(int(random.triangular(0, 4.99, 0))):
+                    if random.randrange(3) < 2:
+                        pos = random.choice(list(boundary))
+                    else: pos = self.random_position()
+                    if cells.get(pos, EMPTY_CELL).shape == Cell.CLEARING: continue
+
+                    max_lengths = {}
+                    for direction in Position.EVERY_WHICH_WAY:
+                        head = pos + direction
+                        length = 0
+                        while self.in_bounds(head) and cells.get(head, EMPTY_CELL).shape != Cell.CLEARING:
+                            head += direction
+                            length += 1
+                        if length >= 4: max_lengths[direction] = length
+                    if not max_lengths: continue
+
+                    direction = random.choice(list(max_lengths))
+                    boundary = mark_random_clear(cells, pos, direction, min(6, max_lengths[direction]))
+
+            elif extras < 3: # don't put anything extra
+                pass
+
+            elif extras < 9: # put a floating pill
+                voids = ([]
+                    + [ (pos, Position.UP)
+                        for x in range(self.w)
+                        for y in range(self.h)
+                        if (pos := Position(x,y)) not in cells and Position(x, y-1) not in cells
+                      ]
+                    + [ (pos, Position.RIGHT)
+                        for x in range(self.w-1)
+                        for y in range(self.h)
+                        if (pos := Position(x,y)) not in cells and Position(x+1, y) not in cells
+                      ]
+                    )
+                if voids:
+                    pos, direction = random.choice(voids)
+                    cells[pos] = Cell(random.randrange(Cell.NUM_COLORS), Cell.CLEARING)
+                    cells[pos + direction] = Cell(random.randrange(Cell.NUM_COLORS), Cell.CLEARING)
+
+            else: raise Exception(f'strange kind {extras} while generating extra miscellanea')
+
         return cells
+
+    def positions(self):
+        for x in range(self.w):
+            for y in range(-1, self.h):
+                yield Position(x, y)
+
+    def random_position(self):
+        return Position(random.randrange(self.w), random.randrange(self.h))
 
     def neighboring_colors(self, cells, pos, skip=0):
         colors = []
-        for direction in [Position.LEFT, Position.RIGHT, Position.DOWN, Position.UP]:
+        for direction in Position.EVERY_WHICH_WAY:
             head = pos
             for _ in range(skip+1):
                 while True:
@@ -254,13 +324,13 @@ class Playfield:
         return pos.x >= 0 and pos.y >= 0 and pos.x < self.w and pos.y < self.h
 
     def parameter_offset(self, pos):
-        return Playfield._PARAMETERS_PER_POSITION * (pos.y*self.w + pos.x)
+        return Playfield._PARAMETERS_PER_POSITION * ((pos.y+1)*self.w + pos.x)
 
 def non_clearing_colors(cells, pos):
     return [color for color in range(Cell.NUM_COLORS) if max_run(cells, pos, color) < 4]
 
 def max_run(cells, pos, color):
-    lengths = [run_length(cells, pos, color, direction) for direction in [Position.LEFT, Position.RIGHT, Position.UP, Position.DOWN]]
+    lengths = [run_length(cells, pos, color, direction) for direction in Position.EVERY_WHICH_WAY]
     return 1+max(lengths[0]+lengths[1], lengths[2]+lengths[3])
 
 def run_length(cells, pos, color, direction):
@@ -271,6 +341,39 @@ def run_length(cells, pos, color, direction):
         if cell.color != color or cell.shape == Cell.EMPTY: break
         n += 1
     return n
+
+def mark_random_clear(cells, pos, direction, max_length):
+    color = random.randrange(Cell.NUM_COLORS)
+    length = int(random.triangular(4, max_length+0.99, 4))
+    cleared = set()
+
+    to_clear = set(pos + i*direction for i in range(length))
+    head = pos - direction
+    while (cell := cells.get(head, EMPTY_CELL)) != EMPTY_CELL and cell.color == color:
+        to_clear.add(head)
+        head -= direction
+    head = pos + length*direction
+    while (cell := cells.get(head, EMPTY_CELL)) != EMPTY_CELL and cell.color == color:
+        to_clear.add(head)
+        head += direction
+
+    while to_clear:
+        pos = to_clear.pop()
+        if pos in cleared: continue
+        cleared.add(pos)
+        for direction in [Position.LEFT, Position.UP]:
+            run1 = run_length(cells, pos, color, direction)
+            run2 = run_length(cells, pos, color, -direction)
+            if run1+run2+1 >= 4:
+                to_clear.update(pos + i*direction for i in range(-run2, run1+1))
+
+    boundary = set()
+    for pos in cleared:
+        cells[pos] = Cell(color, Cell.CLEARING)
+        boundary.update(pos + direction for direction in Position.EVERY_WHICH_WAY)
+    boundary -= cleared
+
+    return boundary
 
 # A scene is a collection of instructions for creating a random training
 # example. Instructions are nested when in a SceneTree, but in Scene all the
@@ -304,17 +407,14 @@ class Scene:
         frame_parity = random.randrange(2)
         for offset, playfield in self.playfields:
             cells = playfield.render()
-            for y in range(playfield.h):
-                for x in range(playfield.w):
-                    pos = Position(x,y)
+            for pos in playfield.positions():
+                cell = cells.get(pos, EMPTY_CELL)
+                pos_offset = offset + playfield.parameter_offset(pos)
 
-                    cell = cells.get(pos, EMPTY_CELL)
-                    pos_offset = offset + playfield.parameter_offset(pos)
-
-                    slices += cell.onehot_ranges(pos_offset)
-                    parameters[pos_offset + cell.color] = 1
-                    parameters[pos_offset + Cell.NUM_COLORS + cell.shape] = 1
-                    cache.load(cell.template_name(frame_parity)).at(image, playfield.pos + 8*pos)
+                slices += cell.onehot_ranges(pos_offset)
+                parameters[pos_offset + cell.color] = 1
+                parameters[pos_offset + Cell.NUM_COLORS + cell.shape] = 1
+                cache.load(cell.template_name(frame_parity)).at(image, playfield.pos + 8*pos)
 
         return TrainingExample(image, parameters, slices, self.alternative_indices)
 
@@ -467,7 +567,7 @@ with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
 
 cache = TemplateCache()
-while cv2.waitKey(1000) != 113:
+while cv2.waitKey(10000) != 113:
     for scene in t.flatten():
         example = scene.render(cache)
         name = ' '.join(scene.name)
