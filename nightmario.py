@@ -287,8 +287,9 @@ class Playfield:
                     )
                 if voids:
                     pos, direction = random.choice(voids)
-                    cells[pos] = Cell(random.randrange(Cell.NUM_COLORS), Cell.CLEARING)
-                    cells[pos + direction] = Cell(random.randrange(Cell.NUM_COLORS), Cell.CLEARING)
+                    bl_shape, other_shape = [Cell.LEFT, Cell.RIGHT] if direction == Position.RIGHT else [Cell.DOWN, Cell.UP]
+                    cells[pos] = Cell(random.randrange(Cell.NUM_COLORS), bl_shape)
+                    cells[pos + direction] = Cell(random.randrange(Cell.NUM_COLORS), other_shape)
 
             else: raise Exception(f'strange kind {extras} while generating extra miscellanea')
 
