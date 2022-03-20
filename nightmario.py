@@ -7,7 +7,7 @@ import re
 import sys
 
 from dataclasses import dataclass
-from os import path
+from os import path, walk
 from typing import Dict, List, Optional, Set, Tuple
 
 @dataclass(frozen=True)
@@ -564,6 +564,50 @@ def filter_artifacts(image):
     assert(any(x > 1 for x in image.shape))
     return image
 
+PHOTOS_DIR = "/slow/dmwit/imagenet/ILSVRC/Data/CLS-LOC/train"
+def load_random_photo():
+    directory = PHOTOS_DIR
+    while True:
+        _, directories, files = walk(directory).__next__()
+        if directories and files: raise Exception(f'Error when loading a random image: directory {directory} has both files and directories.')
+        if directories:
+            directory = path.join(directory, random.choice(directories))
+        elif files:
+            return cv2.imread(path.join(directory, random.choice(files)), cv2.IMREAD_UNCHANGED)
+        else:
+            raise Exception(f'Error when loading a random image: directory {directory} is empty.')
+
+SCALING_METHODS = [cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_LANCZOS4]
+def noisy_scale(image):
+    fx = random.normalvariate(3, 0.1)
+    fy = random.normalvariate(3, 0.1)
+    dx = round(random.normalvariate(0, 4))*fx*8 + random.normalvariate(0, 2) + (fx-3)*image.shape[1]/2
+    dy = round(random.normalvariate(0, 4))*fy*8 + random.normalvariate(0, 2) + (fy-3)*image.shape[0]/2
+
+    if not random.randrange(100):
+        background = numpy.ones((image.shape[0]*3, image.shape[1]*3, 3), dtype=numpy.uint8) \
+            * numpy.array([[[random.randrange(256), random.randrange(256), random.randrange(256)]]], dtype=numpy.uint8)
+    else:
+        background = load_random_photo()
+        bg_scale = 3*max(image.shape[0]/background.shape[0], image.shape[1]/background.shape[1])
+        background = cv2.resize(background, None, None, bg_scale, bg_scale)
+        if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
+        background = background[
+            slice_size(random.randrange(background.shape[0] - 3*image.shape[0] + 1), 3*image.shape[0]),
+            slice_size(random.randrange(background.shape[1] - 3*image.shape[1] + 1), 3*image.shape[1]),
+            0:3
+            ]
+
+    result = cv2.warpAffine(
+        image,
+        numpy.array([[fx, 0, dx], [0, fy, dy]]),
+        (image.shape[1]*3, image.shape[0]*3),
+        background,
+        random.choice(SCALING_METHODS),
+        cv2.BORDER_TRANSPARENT,
+        )
+    return result
+
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
 
@@ -572,4 +616,4 @@ while cv2.waitKey(10000) != 113:
     for scene in t.flatten():
         example = scene.render(cache)
         name = ' '.join(scene.name)
-        cv2.imshow(' '.join(scene.name), filter_artifacts(example.image))
+        cv2.imshow(' '.join(scene.name), filter_artifacts(noisy_scale(example.image)))
