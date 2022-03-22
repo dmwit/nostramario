@@ -2,6 +2,7 @@ import cv2
 import dataclasses
 import itertools
 import numpy
+import numpy.random
 import random
 import re
 import sys
@@ -9,6 +10,8 @@ import sys
 from dataclasses import dataclass
 from os import path, walk
 from typing import Dict, List, Optional, Set, Tuple
+
+np_rng = numpy.random.default_rng()
 
 @dataclass(frozen=True)
 class Position:
@@ -564,6 +567,99 @@ def filter_artifacts(image):
     assert(any(x > 1 for x in image.shape))
     return image
 
+def filter_hsv(image):
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(numpy.int16)
+    dh = round(random.normalvariate(0, 5))
+    ds = round(random.normalvariate(0, 20))
+    dv = round(random.normalvariate(0, 40))
+    image = image + [[[dh, ds, dv]]]
+    image[:, :, 0] = image[:, :, 0] % 180
+    image[:, :, 1:] = numpy.clip(image[:, :, 1:], 0, 255)
+    image = cv2.cvtColor(image.astype(numpy.uint8), cv2.COLOR_HSV2BGR)
+    return image
+
+def filter_channel_offsets(image):
+    src2tgt, tgt2src = random.choice([
+        (cv2.COLOR_BGR2YCrCb, cv2.COLOR_YCrCb2BGR),
+        (cv2.COLOR_BGR2HSV, cv2.COLOR_HSV2BGR),
+        (cv2.COLOR_BGR2YUV, cv2.COLOR_YUV2BGR),
+        (None, None),
+        ])
+    rotation = random.randrange(2)
+
+    if src2tgt is not None: image = cv2.cvtColor(image, src2tgt)
+    image = numpy.rot90(image, k=rotation)
+
+    period = random.randrange(1,20)
+    w = image.shape[1]
+    offsets = [[round(random.normalvariate(0, 2)) % w for _ in range(3)] for _ in range(period)]
+
+    for i, channel_offsets in enumerate(offsets):
+        for j, offset in enumerate(channel_offsets):
+            image[i::period, :, j] = numpy.roll(image[i::period, :, j], offset, axis=1)
+
+    image = numpy.rot90(image, k=-rotation)
+    if tgt2src is not None: image = cv2.cvtColor(image, tgt2src)
+    return image
+
+def filter_speckle(image):
+    while True:
+        variance = abs(random.normalvariate(0, 10))
+        if variance: break
+
+    image = image + numpy.around(np_rng.normal(0, variance, image.shape)).astype(numpy.int16)
+    return numpy.clip(image, 0, 255).astype(numpy.uint8)
+
+def filter_blur(image): return cv2.GaussianBlur(image, None, random.uniform(0.1, 4))
+
+def filter_overlay_photo(image):
+    photo = load_random_photo()
+    rotations = random.randrange(4)
+    image = numpy.rot90(image, rotations)
+    photo = numpy.rot90(photo, rotations)
+
+    if random.randrange(2):
+        # put the photo in a corner
+        while True:
+            x = int(abs(random.normalvariate(0, image.shape[1]//10)))
+            y = int(abs(random.normalvariate(0, image.shape[0]//10)))
+            if 0 < x and x < image.shape[1] and x < photo.shape[1] and 0 < y and y < image.shape[0] and y < photo.shape[0]:
+                break
+        image[:y, :x, :] = photo[-y:, -x:, :]
+    else:
+        # put the photo on an edge
+        while True:
+            x = int(abs(random.normalvariate(0, image.shape[1]//15)))
+            y = int(random.normalvariate(image.shape[0]//2, image.shape[0]//15))
+            if 0 < x and x < image.shape[1] and x < photo.shape[1] and 0 < y and y < image.shape[0]:
+                break
+
+        photo_y = photo.shape[0]//2
+        dy_lo = min(y, photo_y)
+        dy_hi = min(image.shape[0]-y, photo.shape[0]-photo_y)
+
+        image[y-dy_lo:y+dy_hi, :x, :] = photo[photo_y-dy_lo:photo_y+dy_hi, -x:, :]
+
+    return numpy.rot90(image, -rotations)
+
+def filter_linear_gradient(image):
+    while True:
+        x0 = random.randrange(-image.shape[1]//4, image.shape[1]*5//4)
+        x1 = random.randrange(-image.shape[1]//4, image.shape[1]*5//4)
+        y0 = random.randrange(-image.shape[0]//4, image.shape[0]*5//4)
+        y1 = random.randrange(-image.shape[0]//4, image.shape[0]*5//4)
+        if x0 != x1 and y0 != y1: break
+
+    # make a copy the first time to protect against a filter that modifies its input
+    image0 = random.choice(ALL_FILTERS)(numpy.array(image))
+    image1 = random.choice(ALL_FILTERS)(image)
+
+    indices = numpy.indices(image.shape[0:2], dtype=numpy.float64)
+    mask = numpy.clip(((indices[0, :, :] - x0)*(y1-y0) + (indices[1, :, :] - y0)*(x1-x0))/(2*(x1-x0)*(y1-y0)), 0, 1)
+    mask = numpy.expand_dims(mask, 2)
+
+    return numpy.around(mask*image0 + (1-mask)*image1).astype(numpy.uint8)
+
 PHOTOS_DIR = "/slow/dmwit/imagenet/ILSVRC/Data/CLS-LOC/train"
 def load_random_photo():
     directory = PHOTOS_DIR
@@ -573,7 +669,9 @@ def load_random_photo():
         if directories:
             directory = path.join(directory, random.choice(directories))
         elif files:
-            return cv2.imread(path.join(directory, random.choice(files)), cv2.IMREAD_UNCHANGED)
+            background = cv2.imread(path.join(directory, random.choice(files)), cv2.IMREAD_UNCHANGED)
+            if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
+            return background
         else:
             raise Exception(f'Error when loading a random image: directory {directory} is empty.')
 
@@ -591,7 +689,6 @@ def noisy_scale(image):
         background = load_random_photo()
         bg_scale = 3*max(image.shape[0]/background.shape[0], image.shape[1]/background.shape[1])
         background = cv2.resize(background, None, None, bg_scale, bg_scale)
-        if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
         background = background[
             slice_size(random.randrange(background.shape[0] - 3*image.shape[0] + 1), 3*image.shape[0]),
             slice_size(random.randrange(background.shape[1] - 3*image.shape[1] + 1), 3*image.shape[1]),
@@ -608,6 +705,13 @@ def noisy_scale(image):
         )
     return result
 
+ALL_FILTERS = [filter_artifacts, filter_hsv, filter_channel_offsets, filter_speckle, filter_blur, filter_overlay_photo, filter_linear_gradient]
+def apply_filters(image):
+    image = noisy_scale(image)
+    while random.randrange(5):
+        image = random.choice(ALL_FILTERS)(image)
+    return image
+
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
 
@@ -616,4 +720,4 @@ while cv2.waitKey(10000) != 113:
     for scene in t.flatten():
         example = scene.render(cache)
         name = ' '.join(scene.name)
-        cv2.imshow(' '.join(scene.name), filter_artifacts(noisy_scale(example.image)))
+        cv2.imshow(' '.join(scene.name), apply_filters(example.image))
