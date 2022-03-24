@@ -379,6 +379,54 @@ def mark_random_clear(cells, pos, direction, max_length):
 
     return boundary
 
+@dataclass(frozen=True)
+class LookaheadSelection:
+    colors: List[int]
+    rotation: int # clockwise
+    pos: Position
+
+    def cells(self):
+        if self.colors:
+            tl_color = self.rotation&2 >> 1
+            dpos, tl_shape, other_shape = [
+                (Position(8, 0), Cell.LEFT, Cell.RIGHT),
+                (Position(0, 8), Cell.UP, Cell.DOWN),
+                ][self.rotation&1]
+            yield self.pos, Cell(self.colors[tl_color], tl_shape)
+            yield self.pos + dpos, Cell(self.colors[1-tl_color], other_shape)
+
+    def parameters(self):
+        c1, c2 = self.colors
+        return [c1, c2 + Cell.NUM_COLORS]
+
+@dataclass
+class Lookahead:
+    # the int is how many clockwise rotations the pill has
+    rotations_and_positions: List[Tuple[int, Position]]
+
+    def __init__(self, rot=None, pos=None):
+        self.rotations_and_positions = [] if rot is None or pos is None else [(rot, pos)]
+
+    def __add__(self, other):
+        result = Lookahead()
+        result.rotations_and_positions = self.rotations_and_positions + other.rotations_and_positions
+        return result
+
+    def __iadd__(self, other):
+        self.rotations_and_positions += other.rotations_and_positions
+
+    def parameter_count(self):
+        return 2*Cell.NUM_COLORS
+
+    def render(self):
+        colors = [random.randrange(Cell.NUM_COLORS), random.randrange(Cell.NUM_COLORS)]
+        return LookaheadSelection(colors, *random.choice(self.rotations_and_positions))
+
+    def onehot_ranges(self, offset):
+        # abbreviation
+        N = Cell.NUM_COLORS
+        return [slice_size(offset, N), slice_size(offset+N, N)]
+
 # A scene is a collection of instructions for creating a random training
 # example. Instructions are nested when in a SceneTree, but in Scene all the
 # tree traversal is already done, and instructions from enclosing parts of the
@@ -390,6 +438,7 @@ class Scene:
     background: str
     layers: List[Tuple[int, ImageLayer]]
     playfields: List[Tuple[int, Playfield]]
+    lookaheads: Dict[str, Tuple[int, Lookahead]]
     parameter_count: int
     alternative_indices: Set[int]
 
@@ -407,7 +456,6 @@ class Scene:
             if layer.learn: parameters[index+offset] = 1
             cache.load(layer.images[index]).at(image, layer.pos)
 
-        EMPTY_CELL = Cell(Cell.BLUE, Cell.EMPTY)
         frame_parity = random.randrange(2)
         for offset, playfield in self.playfields:
             cells = playfield.render()
@@ -420,6 +468,14 @@ class Scene:
                 parameters[pos_offset + Cell.NUM_COLORS + cell.shape] = 1
                 cache.load(cell.template_name(frame_parity)).at(image, playfield.pos + 8*pos)
 
+        for offset, lookahead in self.lookaheads.values():
+            colors = lookahead.render()
+            slices += lookahead.onehot_ranges(offset)
+            for pos, cell in colors.cells():
+                cache.load(cell.template_name(frame_parity)).at(image, pos)
+            for index in colors.parameters():
+                parameters[offset + index] = 1
+
         return TrainingExample(image, parameters, slices, self.alternative_indices)
 
 # the raw data, as close to the directly parsed form as possible
@@ -429,14 +485,15 @@ class SceneTree:
     children: List[Tuple[str, 'SceneTree']]
     layers: List[ImageLayer]
     playfields: List[Playfield]
+    lookaheads: Dict[str, Lookahead]
     _scene_parameters: Optional[Set[int]] = None
     _parameter_count: Optional[int] = None
 
     def flatten(self):
         # [x] is a bit like a mutable version of x
-        yield from self._flatten(None, [], [], [], [0], self.parameter_count(), self.scene_parameters())
+        yield from self._flatten(None, [], [], [], {}, [0], self.parameter_count(), self.scene_parameters())
 
-    def _flatten(self, bg, nm, layers, playfields, index, parameter_count, scene_parameters):
+    def _flatten(self, bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters):
         if bg is None: bg = self.background
         elif self.background is not None:
             raise Exception(f"Ambiguous background in {nm}; it was specified here as {self.background} and in an ancestor as {bg}.")
@@ -448,14 +505,24 @@ class SceneTree:
             playfields.append((index[0], playfield))
             index[0] += playfield.parameter_count()
 
+        # backing out the lookahead changes is too annoying, just do COW instead
+        if self.lookaheads: lookaheads = dict(lookaheads)
+        for k, la in self.lookaheads.items():
+            if k in lookaheads:
+                offset, old_la = lookaheads[k]
+                lookaheads[k] = offset, old_la+la
+            else:
+                lookaheads[k] = index[0], la
+                index[0] += la.parameter_count()
+
         for child_nm, child_t in self.children:
             nm.append(child_nm)
-            yield from child_t._flatten(bg, nm, layers, playfields, index, parameter_count, scene_parameters)
+            yield from child_t._flatten(bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters)
             nm.pop()
 
         if not self.children:
             if bg is None: raise Exception(f"No background specified for {nm}.")
-            yield Scene(list(nm), index[0], bg, list(layers), list(playfields), parameter_count, scene_parameters)
+            yield Scene(list(nm), index[0], bg, list(layers), list(playfields), lookaheads, parameter_count, scene_parameters)
             index[0] += 1
 
         # -0 is 0, so we need a conditional
@@ -468,6 +535,7 @@ class SceneTree:
                 + (0 if self.children else 1)
                 + sum(layer.parameter_count() for layer in self.layers)
                 + sum(playfield.parameter_count() for playfield in self.playfields)
+                + sum(lookahead.parameter_count() for lookahead in self.lookaheads.values())
                 + sum(child.parameter_count() for _, child in self.children)
                 )
         return self._parameter_count
@@ -481,6 +549,7 @@ class SceneTree:
     def _initialize_scene_parameters(self, indices, index):
         index += sum(layer.parameter_count() for layer in self.layers)
         index += sum(playfield.parameter_count() for playfield in self.playfields)
+        index += sum(lookahead.parameter_count() for lookahead in self.lookaheads.values())
 
         for _, child in self.children:
             index = child._initialize_scene_parameters(indices, index)
@@ -506,8 +575,9 @@ def slice_size(start, length): return slice(start, start+length)
 
 LOCATED_REGEX = re.compile('([1-9][0-9]*)[ \t]*,[ \t]*([1-9][0-9]*)[ \t]*(.+)')
 PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*playfield')
+LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead')
 def parse_scene_tree(line_source, parent_indent=None):
-    t = SceneTree(None, [], [], [])
+    t = SceneTree(None, [], [], [], {})
     self_indent = None
 
     for line in line_source:
@@ -538,6 +608,9 @@ def parse_scene_tree(line_source, parent_indent=None):
                 thing = match.group(3)
                 if match := PLAYFIELD_REGEX.fullmatch(thing):
                     t.playfields.append(Playfield(pos, int(match.group(1)), int(match.group(2))))
+                elif match := LOOKAHEAD_REGEX.fullmatch(thing):
+                    la = t.lookaheads.setdefault(match.group(2), Lookahead())
+                    la += Lookahead(int(match.group(1)), pos)
                 else:
                     learn = thing[0] != '!'
                     if not learn: thing = thing[1:]
