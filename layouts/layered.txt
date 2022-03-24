@@ -29,4 +29,28 @@
 	224, 192 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
 
 	96, 72 8x16 playfield
+	190, 62 0 1p lookahead
+	194, 53 1 1p lookahead
+	192, 43 1 1p lookahead
+	184, 40 2 1p lookahead
+	180, 32 2 1p lookahead
+	176, 26 2 1p lookahead
+	176, 19 3 1p lookahead
+	172, 16 3 1p lookahead
+	164, 18 0 1p lookahead
+	160, 17 0 1p lookahead
+	162, 13 1 1p lookahead
+	156, 15 1 1p lookahead
+	148, 21 2 1p lookahead
+	144, 24 2 1p lookahead
+	144, 24 3 1p lookahead
+	140, 29 3 1p lookahead
+	132, 38 0 1p lookahead
+	128, 45 0 1p lookahead
+	128, 49 1 1p lookahead
+	126, 56 1 1p lookahead
+	120, 67 2 1p lookahead
+	124, 68 3 1p lookahead
+
 	12, 124 !magnifier-bry-1.png
+	184, 56 !doc-rest.png; doc-throw.png; doc-hold.png
