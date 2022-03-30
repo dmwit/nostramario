@@ -1,4 +1,6 @@
+# TODO: weights (e.g. to bias towards putting the lookahead inside the lookahead box instead of in its animation)
 1p:
+	# TODO: lost
 	hi:
 		1p-hi.png
 	med:
@@ -52,5 +54,8 @@
 	120, 67 2 1p lookahead
 	124, 68 3 1p lookahead
 
+	# TODO: magnifiers in more rotations, with other virus animation parity, with some missing, with some on their backs from a clear
 	12, 124 !magnifier-bry-1.png
 	184, 56 !doc-rest.png; doc-throw.png; doc-hold.png
+
+# TODO: 2p, level select/{1p, 2p}, other (like start screen, %5 cutscenes, endgame animation, maybe some of the garbage stuff we captured in the screens directory?)
