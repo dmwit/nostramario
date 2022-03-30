@@ -6,9 +6,11 @@ import numpy.random
 import random
 import re
 import sys
+import torch
 
 from dataclasses import dataclass
 from os import path, walk
+from torch import nn
 from typing import Dict, List, Optional, Set, Tuple
 
 np_rng = numpy.random.default_rng()
@@ -784,6 +786,74 @@ def apply_filters(image):
     while random.randrange(5):
         image = random.choice(ALL_FILTERS)(image)
     return image
+
+def conv_block(in_channels, out_channels, kernel_size, stride, device):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=1, padding_mode='reflect', device=device),
+        nn.BatchNorm2d(out_channels, device=device),
+        # paper uses ReLU instead of LeakyReLU
+        nn.LeakyReLU(0.1),
+        )
+
+class Residual(nn.Module):
+    def __init__(self, channels, device):
+        super().__init__()
+        # paper uses range(2) instead of range(3)
+        self.block = nn.Sequential(*(conv_block(channels, channels, 3, 1, device) for _ in range(3)))
+
+    def forward(self, x):
+        # paper puts the last nonlinearity after re-adding to x rather than before
+        return x+self.block.forward(x)
+
+class Downsample(nn.Module):
+    def __init__(self, in_channels, device):
+        super().__init__()
+        self.projection = nn.Conv2d(in_channels, 2*in_channels, 1, stride=2, device=device)
+        self.block = nn.Sequential(
+            conv_block(in_channels, 2*in_channels, 3, 2, device),
+            # paper uses range(1) instead of range(2)
+            *(conv_block(2*in_channels, 2*in_channels, 3, 1, device) for _ in range(2)),
+            )
+
+    def forward(self, x):
+        return self.projection.forward(x)+self.block.forward(x)
+
+class ParseImage(nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.block = nn.Sequential(
+            # paper uses 64 7x7 kernels and a stride of 2, but also a much smaller input image
+            nn.Conv2d(3, 16, 11, stride=2, device=device),
+            nn.MaxPool2d(3, stride=2),
+            nn.BatchNorm2d(16, device=device),
+            nn.LeakyReLU(0.1),
+            )
+
+    def forward(self, x):
+        return self.block.forward(x-127.5)
+
+class Classifier(nn.Module):
+    def __init__(self, scene_tree, device):
+        super().__init__()
+        blocks = [ParseImage(device)]
+        channels = 16
+        for length in [3,4,7,4,3,3]:
+            blocks.extend(Residual(channels, device) for _ in range(length))
+            blocks.append(Downsample(channels, device))
+            channels *= 2
+        self.block = nn.Sequential(*blocks)
+
+        # for lazy initialization
+        self.device = device
+        self.fully_connected = None
+        self.out_size = scene_tree.parameter_count()
+
+    def forward(self, x):
+        # cv2 does HxWxC but torch.nn expects CxWxH, so we need to transpose
+        unstructured_features = torch.flatten(self.block.forward(torch.transpose(x, 1, 3)), start_dim=1)
+        if self.fully_connected is None:
+            self.fully_connected = nn.Linear(unstructured_features.shape[1], self.out_size, device=self.device)
+        return self.fully_connected.forward(unstructured_features)
 
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
