@@ -717,6 +717,13 @@ def filter_overlay_photo(image):
 
     return numpy.rot90(image, -rotations)
 
+def filter_scanline(image):
+    m = random.randrange(2, 8)
+    b = random.randrange(m)
+    if random.randrange(2): image[:, b::m, :] = 0
+    else: image[b::m, :, :] = 0
+    return image
+
 def filter_linear_gradient(image):
     while True:
         x0 = random.randrange(-image.shape[1]//4, image.shape[1]*5//4)
@@ -780,7 +787,7 @@ def noisy_scale(image):
         )
     return result
 
-ALL_FILTERS = [filter_artifacts, filter_hsv, filter_channel_offsets, filter_speckle, filter_blur, filter_overlay_photo, filter_linear_gradient]
+ALL_FILTERS = [filter_artifacts, filter_hsv, filter_channel_offsets, filter_speckle, filter_blur, filter_overlay_photo, filter_scanline, filter_linear_gradient]
 def apply_filters(image):
     image = noisy_scale(image)
     while random.randrange(5):
