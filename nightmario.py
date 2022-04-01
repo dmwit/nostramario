@@ -1,6 +1,7 @@
 import cv2
 import dataclasses
 import itertools
+import math
 import numpy
 import numpy.random
 import random
@@ -442,11 +443,11 @@ class Scene:
     playfields: List[Tuple[int, Playfield]]
     lookaheads: Dict[str, Tuple[int, Lookahead]]
     parameter_count: int
-    alternative_indices: Set[int]
+    alternative_indices: List[int]
 
-    def render(self, cache):
+    def render(self, cache, device):
         image = numpy.array(cache.load(self.background).image)
-        parameters = numpy.zeros(self.parameter_count)
+        parameters = torch.zeros(self.parameter_count)
         parameters[self.index] = 1
         slices = []
 
@@ -478,7 +479,7 @@ class Scene:
             for index in colors.parameters():
                 parameters[offset + index] = 1
 
-        return TrainingExample(image, parameters, slices, self.alternative_indices)
+        return TrainingExample(image, parameters.to(device), slices, self.alternative_indices)
 
 # the raw data, as close to the directly parsed form as possible
 @dataclass
@@ -488,7 +489,7 @@ class SceneTree:
     layers: List[ImageLayer]
     playfields: List[Playfield]
     lookaheads: Dict[str, Lookahead]
-    _scene_parameters: Optional[Set[int]] = None
+    _scene_parameters: Optional[List[int]] = None
     _parameter_count: Optional[int] = None
 
     def flatten(self):
@@ -544,7 +545,7 @@ class SceneTree:
 
     def scene_parameters(self):
         if self._scene_parameters is None:
-            self._scene_parameters = set()
+            self._scene_parameters = []
             self._initialize_scene_parameters(self._scene_parameters, 0)
         return self._scene_parameters
 
@@ -557,7 +558,7 @@ class SceneTree:
             index = child._initialize_scene_parameters(indices, index)
 
         if not self.children:
-            indices.add(index)
+            indices.append(index)
             index += 1
 
         return index
@@ -565,7 +566,7 @@ class SceneTree:
 @dataclass(frozen=True)
 class TrainingExample:
     image: numpy.ndarray
-    classification: numpy.ndarray
+    classification: torch.tensor
     # each slice is an independent classification problem, so should be part of
     # its own cross-correlation calculation
     onehot_ranges: List[slice]
@@ -794,12 +795,27 @@ def apply_filters(image):
         image = random.choice(ALL_FILTERS)(image)
     return image
 
+LEAKAGE = 0.1
+
+# follows advice from Delving Deep into Rectifiers
+class Conv2dReLUInit(nn.Conv2d):
+    def __init__(self, in_channels, out_channels, kernel_size, *args, leakage=LEAKAGE, **kwargs):
+        super().__init__(in_channels, out_channels, kernel_size, *args, **kwargs)
+
+        try:
+            w, h = kernel_size
+        except TypeError:
+            kernel_param_count = kernel_size*kernel_size
+        else:
+            kernel_param_count = w*h
+        nn.init.normal_(self.weight, std=math.sqrt(2/((1+leakage)*kernel_param_count)))
+
 def conv_block(in_channels, out_channels, kernel_size, stride, device):
     return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=1, padding_mode='reflect', device=device),
+        Conv2dReLUInit(in_channels, out_channels, kernel_size, stride=stride, padding=1, padding_mode='reflect', device=device),
         nn.BatchNorm2d(out_channels, device=device),
         # paper uses ReLU instead of LeakyReLU
-        nn.LeakyReLU(0.1),
+        nn.LeakyReLU(LEAKAGE),
         )
 
 class Residual(nn.Module):
@@ -815,7 +831,7 @@ class Residual(nn.Module):
 class Downsample(nn.Module):
     def __init__(self, in_channels, device):
         super().__init__()
-        self.projection = nn.Conv2d(in_channels, 2*in_channels, 1, stride=2, device=device)
+        self.projection = Conv2dReLUInit(in_channels, 2*in_channels, 1, leakage=1, stride=2, device=device)
         self.block = nn.Sequential(
             conv_block(in_channels, 2*in_channels, 3, 2, device),
             # paper uses range(1) instead of range(2)
@@ -830,10 +846,10 @@ class ParseImage(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             # paper uses 64 7x7 kernels and a stride of 2, but also a much smaller input image
-            nn.Conv2d(3, 16, 11, stride=2, device=device),
+            Conv2dReLUInit(3, 16, 11, stride=2, device=device),
             nn.MaxPool2d(3, stride=2),
             nn.BatchNorm2d(16, device=device),
-            nn.LeakyReLU(0.1),
+            nn.LeakyReLU(LEAKAGE),
             )
 
     def forward(self, x):
@@ -862,12 +878,48 @@ class Classifier(nn.Module):
             self.fully_connected = nn.Linear(unstructured_features.shape[1], self.out_size, device=self.device)
         return self.fully_connected.forward(unstructured_features)
 
+def xe_loss_single(probs, target):
+    return nn.functional.cross_entropy(torch.unsqueeze(probs, 0), torch.unsqueeze(target, 0), label_smoothing=0.01)
+
+def loss(tensor, golden, device):
+    l = torch.tensor(0, dtype=torch.float, device=device)
+    for i, example in enumerate(golden):
+        l += xe_loss_single(tensor[i, example.onehot_indices], example.classification[example.onehot_indices])
+        for r in example.onehot_ranges:
+            l += xe_loss_single(tensor[i, r], example.classification[r])
+    return l
+
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
 
+dev = torch.device('cuda')
+c = Classifier(t, dev)
+c.train()
 cache = TemplateCache()
+# initialize the fully-connected layer
+with torch.no_grad(): c(torch.tensor([apply_filters(t.flatten().__next__().render(cache, dev).image)], device=dev))
+opt = torch.optim.SGD(c.parameters(), 0.1, momentum=0.9, weight_decay=0.0001)
+
+train = []
+test = []
+for i in range(20):
+    for scene in t.flatten():
+        train.append(scene.render(cache, dev))
+        test.append(scene.render(cache, dev))
+train_tensor = torch.tensor(numpy.array([apply_filters(x.image) for x in train]), device=dev)
+test_tensor = torch.tensor(numpy.array([apply_filters(x.image) for x in test]), device=dev)
+
+
+with torch.no_grad():
+    print(loss(c(test_tensor), test, dev))
+opt.zero_grad()
+loss(c(train_tensor), train, dev).backward()
+opt.step()
+with torch.no_grad():
+    print(loss(c(test_tensor), test, dev))
+
 while cv2.waitKey(10000) != 113:
     for scene in t.flatten():
-        example = scene.render(cache)
+        example = scene.render(cache, dev)
         name = ' '.join(scene.name)
         cv2.imshow(' '.join(scene.name), apply_filters(example.image))
