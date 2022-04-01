@@ -826,7 +826,7 @@ class Residual(nn.Module):
 
     def forward(self, x):
         # paper puts the last nonlinearity after re-adding to x rather than before
-        return x+self.block.forward(x)
+        return x+self.block(x)
 
 class Downsample(nn.Module):
     def __init__(self, in_channels, device):
@@ -839,7 +839,7 @@ class Downsample(nn.Module):
             )
 
     def forward(self, x):
-        return self.projection.forward(x)+self.block.forward(x)
+        return self.projection(x)+self.block(x)
 
 class ParseImage(nn.Module):
     def __init__(self, device):
@@ -853,7 +853,7 @@ class ParseImage(nn.Module):
             )
 
     def forward(self, x):
-        return self.block.forward(x-127.5)
+        return self.block(x-127.5)
 
 class Classifier(nn.Module):
     def __init__(self, scene_tree, device):
@@ -873,10 +873,10 @@ class Classifier(nn.Module):
 
     def forward(self, x):
         # cv2 does HxWxC but torch.nn expects CxWxH, so we need to transpose
-        unstructured_features = torch.flatten(self.block.forward(torch.transpose(x, 1, 3)), start_dim=1)
+        unstructured_features = torch.flatten(self.block(torch.transpose(x, 1, 3)), start_dim=1)
         if self.fully_connected is None:
             self.fully_connected = nn.Linear(unstructured_features.shape[1], self.out_size, device=self.device)
-        return self.fully_connected.forward(unstructured_features)
+        return self.fully_connected(unstructured_features)
 
 def xe_loss_single(probs, target):
     return nn.functional.cross_entropy(torch.unsqueeze(probs, 0), torch.unsqueeze(target, 0), label_smoothing=0.01)
