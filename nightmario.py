@@ -808,7 +808,7 @@ class Conv2dReLUInit(nn.Conv2d):
             kernel_param_count = kernel_size*kernel_size
         else:
             kernel_param_count = w*h
-        nn.init.normal_(self.weight, std=math.sqrt(2/((1+leakage)*kernel_param_count)))
+        nn.init.normal_(self.weight, std=math.sqrt(2/((1+leakage)*kernel_param_count*in_channels)))
 
 def conv_block(in_channels, out_channels, kernel_size, stride, device):
     return nn.Sequential(
@@ -884,10 +884,11 @@ def xe_loss_single(probs, target):
 def loss(tensor, golden, device):
     l = torch.tensor(0, dtype=torch.float, device=device)
     for i, example in enumerate(golden):
-        l += xe_loss_single(tensor[i, example.onehot_indices], example.classification[example.onehot_indices])
+        v = xe_loss_single(tensor[i, example.onehot_indices], example.classification[example.onehot_indices])
         for r in example.onehot_ranges:
-            l += xe_loss_single(tensor[i, r], example.classification[r])
-    return l
+            v += xe_loss_single(tensor[i, r], example.classification[r])
+        l += v/(len(example.onehot_ranges)+1)
+    return l/max(len(golden), 1)
 
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
@@ -898,7 +899,7 @@ c.train()
 cache = TemplateCache()
 # initialize the fully-connected layer
 with torch.no_grad(): c(torch.tensor([apply_filters(t.flatten().__next__().render(cache, dev).image)], device=dev))
-opt = torch.optim.SGD(c.parameters(), 0.1, momentum=0.9, weight_decay=0.0001)
+opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
 
 train = []
 test = []
@@ -908,7 +909,6 @@ for i in range(20):
         test.append(scene.render(cache, dev))
 train_tensor = torch.tensor(numpy.array([apply_filters(x.image) for x in train]), device=dev)
 test_tensor = torch.tensor(numpy.array([apply_filters(x.image) for x in test]), device=dev)
-
 
 with torch.no_grad():
     print(loss(c(test_tensor), test, dev))
