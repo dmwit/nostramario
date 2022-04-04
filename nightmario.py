@@ -912,34 +912,36 @@ with open('layouts/layered.txt') as f:
 
 dev = torch.device('cuda')
 c = Classifier(t, dev)
-c.train()
 cache = TemplateCache()
 # initialize the fully-connected layer
 with torch.no_grad(): c(torch.tensor([t.flatten().__next__().render(cache, dev).filtered_image], device=dev))
 opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
+lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
 
-train = []
 test = []
-for i in range(20):
+for i in range(60):
     for scene in t.flatten():
-        train.append(scene.render(cache, dev))
-        train.append(scene.render(cache, dev))
         test.append(scene.render(cache, dev))
-random.shuffle(train)
-train = list(map(merge_examples, zip(train[0:20], train[20:40])))
-train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
 test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
 
-with torch.no_grad():
-    print(loss(c(test_tensor), test, dev))
-opt.zero_grad()
-loss(c(train_tensor), train, dev).backward()
-opt.step()
-with torch.no_grad():
-    print(loss(c(test_tensor), test, dev))
+for epoch in range(100):
+    train = []
+    for i in range(20):
+        for scene in t.flatten():
+            train.append(scene.render(cache, dev))
+            train.append(scene.render(cache, dev))
+    random.shuffle(train)
+    train = list(map(merge_examples, zip(train[0:20], train[20:40])))
+    train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
 
-while cv2.waitKey(10000) != 113:
-    for scene in t.flatten():
-        example = scene.render(cache, dev)
-        name = ' '.join(scene.name)
-        cv2.imshow(' '.join(scene.name), example.filtered_image)
+    c.train(mode=True)
+    for step in range(100):
+        opt.zero_grad()
+        print(f'\tstep {step}', l := loss(c(train_tensor), train, dev))
+        l.backward()
+        opt.step()
+    c.train(mode=False)
+
+    with torch.no_grad():
+        print(f'epoch {epoch}', loss(c(test_tensor), test, dev))
+    lr_schedule.step()
