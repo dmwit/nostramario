@@ -479,7 +479,7 @@ class Scene:
             for index in colors.parameters():
                 parameters[offset + index] = 1
 
-        return TrainingExample(image, parameters.to(device), slices, self.alternative_indices)
+        return TrainingExample(image, apply_filters(image), parameters.to(device), slices, self.alternative_indices)
 
 # the raw data, as close to the directly parsed form as possible
 @dataclass
@@ -565,7 +565,8 @@ class SceneTree:
 
 @dataclass(frozen=True)
 class TrainingExample:
-    image: numpy.ndarray
+    clean_image: numpy.ndarray
+    filtered_image: numpy.ndarray
     classification: torch.tensor
     # each slice is an independent classification problem, so should be part of
     # its own cross-correlation calculation
@@ -573,6 +574,22 @@ class TrainingExample:
     # the scene identifiers aren't necessarily contiguous, so there's one final
     # classification problem in an arbitrary collection of indices
     onehot_indices: List[int]
+
+# Create hybrid training examples. Linearly mix a collection of images and
+# their classifications. Typically you want to supply a collection with just
+# two examples. This can aid in convergence and robustness of the network.
+def merge_examples(es):
+    weights = [random.random() for _ in es]
+    total_weight = sum(weights)
+    weights = [w / total_weight for w in weights]
+
+    merged_clean_image = sum(map(lambda w, e: w*e.clean_image, weights, es)).astype(numpy.uint8)
+    merged_filtered_image = sum(map(lambda w, e: w*e.filtered_image, weights, es)).astype(numpy.uint8)
+    merged_class = sum(map(lambda w, e: w*e.classification, weights, es))
+    merged_ranges = [x[0] for x in itertools.groupby(sorted(itertools.chain.from_iterable(e.onehot_ranges for e in es)))]
+    assert(all(e.onehot_indices == es[0].onehot_indices for e in es))
+
+    return TrainingExample(merged_clean_image, merged_filtered_image, merged_class, merged_ranges, es[0].onehot_indices)
 
 def slice_size(start, length): return slice(start, start+length)
 
@@ -898,7 +915,7 @@ c = Classifier(t, dev)
 c.train()
 cache = TemplateCache()
 # initialize the fully-connected layer
-with torch.no_grad(): c(torch.tensor([apply_filters(t.flatten().__next__().render(cache, dev).image)], device=dev))
+with torch.no_grad(): c(torch.tensor([t.flatten().__next__().render(cache, dev).filtered_image], device=dev))
 opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
 
 train = []
@@ -906,9 +923,12 @@ test = []
 for i in range(20):
     for scene in t.flatten():
         train.append(scene.render(cache, dev))
+        train.append(scene.render(cache, dev))
         test.append(scene.render(cache, dev))
-train_tensor = torch.tensor(numpy.array([apply_filters(x.image) for x in train]), device=dev)
-test_tensor = torch.tensor(numpy.array([apply_filters(x.image) for x in test]), device=dev)
+random.shuffle(train)
+train = list(map(merge_examples, zip(train[0:20], train[20:40])))
+train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
+test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
 
 with torch.no_grad():
     print(loss(c(test_tensor), test, dev))
@@ -922,4 +942,4 @@ while cv2.waitKey(10000) != 113:
     for scene in t.flatten():
         example = scene.render(cache, dev)
         name = ' '.join(scene.name)
-        cv2.imshow(' '.join(scene.name), apply_filters(example.image))
+        cv2.imshow(' '.join(scene.name), example.filtered_image)
