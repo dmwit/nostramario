@@ -909,6 +909,7 @@ def loss(tensor, golden, device):
 
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
+scenes = list(t.flatten())
 
 dev = torch.device('cuda')
 c = Classifier(t, dev)
@@ -918,30 +919,35 @@ with torch.no_grad(): c(torch.tensor([t.flatten().__next__().render(cache, dev).
 opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
 lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
 
+EPOCHS=100
+BATCHES_PER_EPOCH=100
+STEPS_PER_BATCH=100
+MIXES_PER_BATCH=60
+EXAMPLES_PER_MIX=2
+TEST_EXAMPLES=180
+
 test = []
-for i in range(60):
-    for scene in t.flatten():
-        test.append(scene.render(cache, dev))
+for _ in range(TEST_EXAMPLES):
+    test.append(random.choice(scenes).render(cache, dev))
 test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
 
-for epoch in range(100):
-    train = []
-    for i in range(20):
-        for scene in t.flatten():
-            train.append(scene.render(cache, dev))
-            train.append(scene.render(cache, dev))
-    random.shuffle(train)
-    train = list(map(merge_examples, zip(train[0:20], train[20:40])))
-    train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
+for epoch in range(EPOCHS):
+    for batch in range(BATCHES_PER_EPOCH):
+        train = []
+        for _ in range(EXAMPLES_PER_MIX*MIXES_PER_BATCH):
+            train.append(random.choice(scenes).render(cache, dev))
+        random.shuffle(train)
+        train = [merge_examples(train[i::MIXES_PER_BATCH]) for i in range(MIXES_PER_BATCH)]
+        train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
 
-    c.train(mode=True)
-    for step in range(100):
-        opt.zero_grad()
-        print(f'\tstep {step}', l := loss(c(train_tensor), train, dev))
-        l.backward()
-        opt.step()
-    c.train(mode=False)
+        c.train(mode=True)
+        for step in range(STEPS_PER_BATCH):
+            opt.zero_grad()
+            print(f'\tstep {step}', l := loss(c(train_tensor), train, dev))
+            l.backward()
+            opt.step()
+        c.train(mode=False)
 
-    with torch.no_grad():
-        print(f'epoch {epoch}', loss(c(test_tensor), test, dev))
+        with torch.no_grad():
+            print(f'epoch {epoch}, batch {batch}', loss(c(test_tensor), test, dev))
     lr_schedule.step()
