@@ -7,6 +7,7 @@ import numpy.random
 import random
 import re
 import sys
+import tensorboardX as tx
 import torch
 
 from dataclasses import dataclass
@@ -48,6 +49,21 @@ class ImageLayer:
 
     def onehot_ranges(self, offset):
         return [slice_size(offset, len(self.images))] if self.learn else []
+
+    def reconstruct(self, offset, params):
+        return \
+            ImageLayerSelection(self.pos, reconstruct_list(params, offset, self.images)) \
+            if self.learn else \
+            ImageLayerSelection(self.pos, self.images[0])
+
+# TODO: have ImageLayer.render() return one of these
+@dataclass(frozen=True)
+class ImageLayerSelection:
+    pos: Position
+    image: str
+
+    def render(self, cache, image):
+        cache.load(self.image).at(image, self.pos)
 
 @dataclass(frozen=True)
 class Image:
@@ -333,6 +349,16 @@ class Playfield:
     def parameter_offset(self, pos):
         return Playfield._PARAMETERS_PER_POSITION * ((pos.y+1)*self.w + pos.x)
 
+    def reconstruct(self, offset, params):
+        cells = {
+            pos: Cell(
+                reconstruct_onehot(params, (i := offset + self.parameter_offset(pos)), Cell.NUM_COLORS),
+                reconstruct_onehot(params, i + Cell.NUM_COLORS, Cell.NUM_SHAPES),
+                )
+            for pos in self.positions()
+            }
+        return PlayfieldSelection(self.pos, self.w, self.h, cells, 0)
+
 def non_clearing_colors(cells, pos):
     return [color for color in range(Cell.NUM_COLORS) if max_run(cells, pos, color) < 4]
 
@@ -382,25 +408,25 @@ def mark_random_clear(cells, pos, direction, max_length):
 
     return boundary
 
+# TODO: distinguish render() and select() everywhere
+# TODO: have Playfield.render() return one of these
 @dataclass(frozen=True)
-class LookaheadSelection:
-    colors: List[int]
-    rotation: int # clockwise
+class PlayfieldSelection:
     pos: Position
+    w: int
+    h: int
+    cells: Dict[Position, Cell]
+    frame_parity: int
 
-    def cells(self):
-        if self.colors:
-            tl_color = self.rotation&2 >> 1
-            dpos, tl_shape, other_shape = [
-                (Position(8, 0), Cell.LEFT, Cell.RIGHT),
-                (Position(0, 8), Cell.UP, Cell.DOWN),
-                ][self.rotation&1]
-            yield self.pos, Cell(self.colors[tl_color], tl_shape)
-            yield self.pos + dpos, Cell(self.colors[1-tl_color], other_shape)
+    def render(self, cache, image):
+        for cell_pos in self.positions():
+            cell = self.cells.get(cell_pos, EMPTY_CELL)
+            cache.load(cell.template_name(self.frame_parity)).at(image, self.pos + 8*cell_pos)
 
-    def parameters(self):
-        c1, c2 = self.colors
-        return [c1, c2 + Cell.NUM_COLORS]
+    def positions(self):
+        for x in range(self.w):
+            for y in range(-1, self.h):
+                yield Position(x, y)
 
 @dataclass
 class Lookahead:
@@ -429,6 +455,35 @@ class Lookahead:
         # abbreviation
         N = Cell.NUM_COLORS
         return [slice_size(offset, N), slice_size(offset+N, N)]
+
+    def reconstruct(self, offset, params):
+        N = Cell.NUM_COLORS
+        colors = [reconstruct_onehot(params, offset, N), reconstruct_onehot(params, offset+N, N)]
+        return LookaheadSelection(colors, *self.rotations_and_positions[0])
+
+@dataclass(frozen=True)
+class LookaheadSelection:
+    colors: List[int]
+    rotation: int # clockwise
+    pos: Position
+
+    def cells(self):
+        if self.colors:
+            tl_color = self.rotation&2 >> 1
+            dpos, tl_shape, other_shape = [
+                (Position(8, 0), Cell.LEFT, Cell.RIGHT),
+                (Position(0, 8), Cell.UP, Cell.DOWN),
+                ][self.rotation&1]
+            yield self.pos, Cell(self.colors[tl_color], tl_shape)
+            yield self.pos + dpos, Cell(self.colors[1-tl_color], other_shape)
+
+    def parameters(self):
+        c1, c2 = self.colors
+        return [c1, c2 + Cell.NUM_COLORS]
+
+    def render(self, cache, image):
+        for pos, cell in self.cells():
+            cache.load(cell.template_name(0)).at(image, pos)
 
 # A scene is a collection of instructions for creating a random training
 # example. Instructions are nested when in a SceneTree, but in Scene all the
@@ -480,6 +535,21 @@ class Scene:
                 parameters[offset + index] = 1
 
         return TrainingExample(image, apply_filters(image), parameters.to(device), slices, self.alternative_indices)
+
+@dataclass(frozen=True)
+class SceneSelection:
+    name: List[str]
+    background: str
+    layers: List[ImageLayerSelection]
+    playfields: List[PlayfieldSelection]
+    lookaheads: Dict[str, LookaheadSelection]
+
+    def render(self, cache):
+        image = numpy.array(cache.load(self.background).image)
+        for layer in self.layers: layer.render(cache, image)
+        for playfield in self.playfields: playfield.render(cache, image)
+        for lookahead in self.lookaheads.values(): lookahead.render(cache, image)
+        return image
 
 # the raw data, as close to the directly parsed form as possible
 @dataclass
@@ -562,6 +632,28 @@ class SceneTree:
             index += 1
 
         return index
+
+class Scenes:
+    def __init__(self, scene_tree):
+        self.list = list(scene_tree.flatten())
+        self.indices = [scene.index for scene in self.list]
+
+    def select(self):
+        return random.choice(self.list)
+
+    def reconstruct(self, params):
+        scene = reconstruct_list(params[self.indices], 0, self.list)
+        return SceneSelection(scene.name, scene.background,
+            [layer.reconstruct(i, params) for i, layer in scene.layers],
+            [playfield.reconstruct(i, params) for i, playfield in scene.playfields],
+            {nm: lookahead.reconstruct(i, params) for nm, (i, lookahead) in scene.lookaheads.items()},
+            )
+
+def reconstruct_onehot(params, offset, size):
+    return torch.argmax(params[slice_size(offset, size)])
+
+def reconstruct_list(params, offset, answers):
+    return answers[reconstruct_onehot(params, offset, len(answers))]
 
 @dataclass(frozen=True)
 class TrainingExample:
@@ -898,26 +990,33 @@ class Classifier(nn.Module):
 def xe_loss_single(probs, target):
     return nn.functional.cross_entropy(torch.unsqueeze(probs, 0), torch.unsqueeze(target, 0), label_smoothing=0.01)
 
-def loss(tensor, golden, device):
-    l = torch.tensor(0, dtype=torch.float, device=device)
+def losses(tensor, golden, device):
+    ls = torch.zeros((len(golden),), dtype=torch.float, device=device)
     for i, example in enumerate(golden):
-        v = xe_loss_single(tensor[i, example.onehot_indices], example.classification[example.onehot_indices])
+        ls[i] = xe_loss_single(tensor[i, example.onehot_indices], example.classification[example.onehot_indices])
         for r in example.onehot_ranges:
-            v += xe_loss_single(tensor[i, r], example.classification[r])
-        l += v/(len(example.onehot_ranges)+1)
-    return l/max(len(golden), 1)
+            ls[i] += xe_loss_single(tensor[i, r], example.classification[r])
+        ls[i] /= len(example.onehot_ranges)+1
+    return ls
+
+def loss(tensor, golden, device):
+    return torch.sum(losses(tensor, golden, device))/max(len(golden), 1)
+
+def global_step(epoch, batch, step):
+    return step + STEPS_PER_BATCH*(batch + BATCHES_PER_EPOCH*epoch)
 
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
-scenes = list(t.flatten())
+scenes = Scenes(t)
 
 dev = torch.device('cuda')
 c = Classifier(t, dev)
 cache = TemplateCache()
 # initialize the fully-connected layer
-with torch.no_grad(): c(torch.tensor([t.flatten().__next__().render(cache, dev).filtered_image], device=dev))
+with torch.no_grad(): c(torch.tensor(numpy.array([t.flatten().__next__().render(cache, dev).filtered_image]), device=dev))
 opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
 lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
+log = tx.SummaryWriter()
 
 EPOCHS=100
 BATCHES_PER_EPOCH=100
@@ -928,26 +1027,48 @@ TEST_EXAMPLES=180
 
 test = []
 for _ in range(TEST_EXAMPLES):
-    test.append(random.choice(scenes).render(cache, dev))
+    test.append(scenes.select().render(cache, dev))
 test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
 
 for epoch in range(EPOCHS):
     for batch in range(BATCHES_PER_EPOCH):
         train = []
         for _ in range(EXAMPLES_PER_MIX*MIXES_PER_BATCH):
-            train.append(random.choice(scenes).render(cache, dev))
-        random.shuffle(train)
+            train.append(scenes.select().render(cache, dev))
         train = [merge_examples(train[i::MIXES_PER_BATCH]) for i in range(MIXES_PER_BATCH)]
         train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
 
         c.train(mode=True)
         for step in range(STEPS_PER_BATCH):
             opt.zero_grad()
-            print(f'\tstep {step}', l := loss(c(train_tensor), train, dev))
+            log.add_scalar('training loss', l := loss(c(train_tensor), train, dev), n := global_step(epoch, batch, step))
+            if step == 0: log.add_scalar('batch start training loss', l, n)
+            if step == STEPS_PER_BATCH-1: log.add_scalar('batch end training loss', l, n)
             l.backward()
             opt.step()
         c.train(mode=False)
 
         with torch.no_grad():
-            print(f'epoch {epoch}, batch {batch}', loss(c(test_tensor), test, dev))
+            classifications = c(test_tensor)
+            ls = losses(classifications, test, dev).to('cpu')
+
+            log.add_scalar('test loss', torch.sum(ls)/ls.shape[0], global_step(epoch, batch, step))
+            if not batch%10:
+                classifications = classifications.to('cpu')
+                _, indices = torch.sort(ls)
+                clean_h, clean_w, _ = test[0].clean_image.shape
+                filtered_h, filtered_w, _ = test[0].filtered_image.shape
+                h = clean_h + filtered_h
+                w = max(2*clean_w, filtered_w)
+
+                reconstructions = numpy.zeros((10, h, w, 3), dtype=numpy.uint8)
+                for i in [0, 1, 2, 3, 4, -5, -4, -3, -2, -1]:
+                    reconstructions[i, :clean_h, :clean_w, :] = test[indices[i]].clean_image
+                    reconstructions[i, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[i]]).render(cache)
+                    reconstructions[i, clean_h:, :filtered_w, :] = test[indices[i]].filtered_image
+                # OpenCV uses BGR by default, tensorboardX uses RGB by default
+                reconstructions = numpy.flip(reconstructions, 3)
+                log.add_images('good reconstructions', reconstructions[:5], n, dataformats='NHWC')
+                log.add_images('bad reconstructions', reconstructions[5:], n, dataformats='NHWC')
+
     lr_schedule.step()
