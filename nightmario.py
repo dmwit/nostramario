@@ -1019,11 +1019,12 @@ lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
 log = tx.SummaryWriter()
 
 EPOCHS=100
-BATCHES_PER_EPOCH=100
-STEPS_PER_BATCH=100
+BATCHES_PER_EPOCH=1000
+STEPS_PER_BATCH=10
 MIXES_PER_BATCH=60
 EXAMPLES_PER_MIX=2
 TEST_EXAMPLES=180
+BATCHES_PER_RECONSTRUCTION=40
 
 test = []
 for _ in range(TEST_EXAMPLES):
@@ -1052,8 +1053,8 @@ for epoch in range(EPOCHS):
             classifications = c(test_tensor)
             ls = losses(classifications, test, dev).to('cpu')
 
-            log.add_scalar('test loss', torch.sum(ls)/ls.shape[0], global_step(epoch, batch, step))
-            if not batch%10:
+            log.add_scalar('test loss', torch.sum(ls)/ls.shape[0], n)
+            if not (n//STEPS_PER_BATCH) % BATCHES_PER_RECONSTRUCTION:
                 classifications = classifications.to('cpu')
                 _, indices = torch.sort(ls)
                 clean_h, clean_w, _ = test[0].clean_image.shape
