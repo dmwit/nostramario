@@ -1020,7 +1020,7 @@ lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
 log = tx.SummaryWriter()
 
 EPOCHS=100
-BATCHES_PER_EPOCH=1000
+BATCHES_PER_EPOCH=50
 STEPS_PER_BATCH=10
 MIXES_PER_BATCH=60
 EXAMPLES_PER_MIX=2
