@@ -50,13 +50,17 @@ class ImageLayer:
     def onehot_ranges(self, offset):
         return [slice_size(offset, len(self.images))] if self.learn else []
 
+    def select(self, offset, params):
+        i = random.randrange(len(self.images))
+        if self.learn: params[offset+i] = 1
+        return ImageLayerSelection(self.pos, self.images[i])
+
     def reconstruct(self, offset, params):
         return \
             ImageLayerSelection(self.pos, reconstruct_list(params, offset, self.images)) \
             if self.learn else \
             ImageLayerSelection(self.pos, self.images[0])
 
-# TODO: have ImageLayer.render() return one of these
 @dataclass(frozen=True)
 class ImageLayerSelection:
     pos: Position
@@ -126,6 +130,9 @@ class Cell:
         extra = frame_parity+1 if self.shape == Cell.VIRUS else ''
         return f'{Cell._COLOR_CHARS[self.color]}{Cell._SHAPE_CHARS[self.shape]}{extra}.png'
 
+    def layer(self, frame_parity, pos):
+        return ImageLayerSelection(pos, self.template_name(frame_parity))
+
 EMPTY_CELL = Cell(Cell.BLUE, Cell.EMPTY)
 
 # Information about the bottle, you know, the 8x16 grid of viruses and pills
@@ -141,7 +148,7 @@ class Playfield:
     def parameter_count(self):
         return self.w*(self.h+1)*Playfield._PARAMETERS_PER_POSITION
 
-    def render(self):
+    def select(self, offset, params, frame_parity):
         cells = {}
 
         # add some viruses
@@ -197,9 +204,9 @@ class Playfield:
                 else: del bottoms[x]
 
         # put some pills and stuff
-        # made this typo three times in a row. this is my life now
         falling = not random.randrange(5) # can stuff be in midair?
         i = int(random.gammavariate(1,3) if falling else random.gammavariate(2.5, 3.5))
+        # made this typo three times in a row. this is my life now
         attemptys = 0
         while i>0 and attemptys<1000:
             attemptys += 1
@@ -315,7 +322,13 @@ class Playfield:
 
             else: raise Exception(f'strange kind {extras} while generating extra miscellanea')
 
-        return cells
+        for pos in self.positions():
+            cell = cells.get(pos, EMPTY_CELL)
+            pos_offset = self.parameter_offset(pos)
+            params[offset + pos_offset + cell.color] = 1
+            params[offset + pos_offset + Cell.NUM_COLORS + cell.shape] = 1
+
+        return PlayfieldSelection(self.pos, self.w, self.h, cells, frame_parity)
 
     def positions(self):
         for x in range(self.w):
@@ -348,6 +361,12 @@ class Playfield:
 
     def parameter_offset(self, pos):
         return Playfield._PARAMETERS_PER_POSITION * ((pos.y+1)*self.w + pos.x)
+
+    def onehot_ranges(self, offset):
+        return [slice_size(offset + self.parameter_offset(pos) + i, size)
+            for pos in self.positions()
+            for i, size in [(0, Cell.NUM_COLORS), (Cell.NUM_COLORS, Cell.NUM_SHAPES)]
+            ]
 
     def reconstruct(self, offset, params):
         cells = {
@@ -408,8 +427,6 @@ def mark_random_clear(cells, pos, direction, max_length):
 
     return boundary
 
-# TODO: distinguish render() and select() everywhere
-# TODO: have Playfield.render() return one of these
 @dataclass(frozen=True)
 class PlayfieldSelection:
     pos: Position
@@ -420,8 +437,9 @@ class PlayfieldSelection:
 
     def render(self, cache, image):
         for cell_pos in self.positions():
-            cell = self.cells.get(cell_pos, EMPTY_CELL)
-            cache.load(cell.template_name(self.frame_parity)).at(image, self.pos + 8*cell_pos)
+            self.cells.get(cell_pos, EMPTY_CELL) \
+                .layer(self.frame_parity, self.pos + 8*cell_pos) \
+                .render(cache, image)
 
     def positions(self):
         for x in range(self.w):
@@ -447,9 +465,11 @@ class Lookahead:
     def parameter_count(self):
         return 2*Cell.NUM_COLORS
 
-    def render(self):
+    def select(self, offset, params, frame_parity):
         colors = [random.randrange(Cell.NUM_COLORS), random.randrange(Cell.NUM_COLORS)]
-        return LookaheadSelection(colors, *random.choice(self.rotations_and_positions))
+        params[offset + colors[0]] = 1
+        params[offset + Cell.NUM_COLORS + colors[1]] = 1
+        return LookaheadSelection(colors, *random.choice(self.rotations_and_positions), frame_parity)
 
     def onehot_ranges(self, offset):
         # abbreviation
@@ -459,13 +479,14 @@ class Lookahead:
     def reconstruct(self, offset, params):
         N = Cell.NUM_COLORS
         colors = [reconstruct_onehot(params, offset, N), reconstruct_onehot(params, offset+N, N)]
-        return LookaheadSelection(colors, *self.rotations_and_positions[0])
+        return LookaheadSelection(colors, *self.rotations_and_positions[0], 0)
 
 @dataclass(frozen=True)
 class LookaheadSelection:
     colors: List[int]
     rotation: int # clockwise
     pos: Position
+    frame_parity: int
 
     def cells(self):
         if self.colors:
@@ -477,13 +498,9 @@ class LookaheadSelection:
             yield self.pos, Cell(self.colors[tl_color], tl_shape)
             yield self.pos + dpos, Cell(self.colors[1-tl_color], other_shape)
 
-    def parameters(self):
-        c1, c2 = self.colors
-        return [c1, c2 + Cell.NUM_COLORS]
-
     def render(self, cache, image):
         for pos, cell in self.cells():
-            cache.load(cell.template_name(0)).at(image, pos)
+            cache.load(cell.template_name(self.frame_parity)).at(image, pos)
 
 # A scene is a collection of instructions for creating a random training
 # example. Instructions are nested when in a SceneTree, but in Scene all the
@@ -500,41 +517,25 @@ class Scene:
     parameter_count: int
     alternative_indices: List[int]
 
-    def render(self, cache, device):
-        image = numpy.array(cache.load(self.background).image)
-        parameters = torch.zeros(self.parameter_count)
-        parameters[self.index] = 1
-        slices = []
-
-        for offset, layer in self.layers:
-            num_images = len(layer.images)
-            slices += layer.onehot_ranges(offset)
-
-            index = random.randrange(num_images)
-            if layer.learn: parameters[index+offset] = 1
-            cache.load(layer.images[index]).at(image, layer.pos)
-
+    def select(self, params):
+        params[self.index] = 1
         frame_parity = random.randrange(2)
-        for offset, playfield in self.playfields:
-            cells = playfield.render()
-            for pos in playfield.positions():
-                cell = cells.get(pos, EMPTY_CELL)
-                pos_offset = offset + playfield.parameter_offset(pos)
+        return SceneSelection(self.name, self.background,
+            [layer.select(offset, params) for offset, layer in self.layers],
+            [playfield.select(offset, params, frame_parity) for offset, playfield in self.playfields],
+            {nm: lookahead.select(offset, params, frame_parity) for nm, (offset, lookahead) in self.lookaheads.items()},
+            )
 
-                slices += cell.onehot_ranges(pos_offset)
-                parameters[pos_offset + cell.color] = 1
-                parameters[pos_offset + Cell.NUM_COLORS + cell.shape] = 1
-                cache.load(cell.template_name(frame_parity)).at(image, playfield.pos + 8*pos)
+    def render(self, cache, device):
+        params = torch.zeros(self.parameter_count)
+        image = self.select(params).render(cache)
 
-        for offset, lookahead in self.lookaheads.values():
-            colors = lookahead.render()
-            slices += lookahead.onehot_ranges(offset)
-            for pos, cell in colors.cells():
-                cache.load(cell.template_name(frame_parity)).at(image, pos)
-            for index in colors.parameters():
-                parameters[offset + index] = 1
+        slices = []
+        for offset, layer in self.layers: slices += layer.onehot_ranges(offset)
+        for offset, playfield in self.playfields: slices += playfield.onehot_ranges(offset)
+        for offset, lookahead in self.lookaheads.values(): slices += lookahead.onehot_ranges(offset)
 
-        return TrainingExample(image, apply_filters(image), parameters.to(device), slices, self.alternative_indices)
+        return TrainingExample(image, apply_filters(image), params.to(device), slices, self.alternative_indices)
 
 @dataclass(frozen=True)
 class SceneSelection:
