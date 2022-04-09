@@ -362,12 +362,6 @@ class Playfield:
     def parameter_offset(self, pos):
         return Playfield._PARAMETERS_PER_POSITION * ((pos.y+1)*self.w + pos.x)
 
-    def onehot_ranges(self, offset):
-        return [slice_size(offset + self.parameter_offset(pos) + i, size)
-            for pos in self.positions()
-            for i, size in [(0, Cell.NUM_COLORS), (Cell.NUM_COLORS, Cell.NUM_SHAPES)]
-            ]
-
     def reconstruct(self, offset, params):
         cells = {
             pos: Cell(
@@ -440,6 +434,12 @@ class PlayfieldSelection:
             self.cells.get(cell_pos, EMPTY_CELL) \
                 .layer(self.frame_parity, self.pos + 8*cell_pos) \
                 .render(cache, image)
+
+    def onehot_ranges(self, offset):
+        return [s
+            for pos in self.positions()
+            for s in self.cells.get(pos, EMPTY_CELL).onehot_ranges(offset + Playfield.parameter_offset(self, pos))
+            ]
 
     def positions(self):
         for x in range(self.w):
@@ -528,11 +528,13 @@ class Scene:
 
     def render(self, cache, device):
         params = torch.zeros(self.parameter_count)
-        image = self.select(params).render(cache)
+        selection = self.select(params)
+        image = selection.render(cache)
 
         slices = []
         for offset, layer in self.layers: slices += layer.onehot_ranges(offset)
-        for offset, playfield in self.playfields: slices += playfield.onehot_ranges(offset)
+        for playfield, (offset, _) in zip(selection.playfields, self.playfields):
+            slices += playfield.onehot_ranges(offset)
         for offset, lookahead in self.lookaheads.values(): slices += lookahead.onehot_ranges(offset)
 
         return TrainingExample(image, apply_filters(image), params.to(device), slices, self.alternative_indices)
