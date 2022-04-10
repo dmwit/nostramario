@@ -9,26 +9,26 @@
 		1p-low.png
 
 	# top score
-	16, 56 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	24, 56 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	32, 56 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	40, 56 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	48, 56 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
+	16, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	24, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	32, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	40, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	48, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	# current score
-	16, 80 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	24, 80 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	32, 80 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	40, 80 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
-	48, 80 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
+	16, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	24, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	32, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	40, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	48, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	# level
-	216, 144 k0.png; k1.png; k2.png
-	224, 144 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
+	216, 144 1p-k0.png; 1p-k1.png; 1p-k2.png
+	224, 144 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	# virus count
-	216, 192 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png
-	224, 192 k0.png; k1.png; k2.png; k3.png; k4.png; k5.png; k6.png; k7.png; k8.png; k9.png
+	216, 192 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png
+	224, 192 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	96, 72 8x16 playfield
 	190, 62 0 1p lookahead
