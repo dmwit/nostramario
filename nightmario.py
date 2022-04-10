@@ -1021,58 +1021,67 @@ opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
 lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
 log = tx.SummaryWriter()
 
-EPOCHS=100
-BATCHES_PER_EPOCH=100
-STEPS_PER_BATCH=15
-MIXES_PER_BATCH=60
-EXAMPLES_PER_MIX=2
-TEST_EXAMPLES=180
-BATCHES_PER_RECONSTRUCTION=40
+while True:
+    for scene in scenes.list:
+        selection = scene.render(cache, dev)
+        cv2.imshow('-'.join(scene.name) + ' clean', selection.clean_image)
+        cv2.imshow('-'.join(scene.name) + ' filtered', selection.filtered_image)
+    if cv2.waitKey(10000) != 113:
+        break
 
-test = []
-for _ in range(TEST_EXAMPLES):
-    test.append(scenes.select().render(cache, dev))
-test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
-
-for epoch in range(EPOCHS):
-    for batch in range(BATCHES_PER_EPOCH):
-        train = []
-        for _ in range(EXAMPLES_PER_MIX*MIXES_PER_BATCH):
-            train.append(scenes.select().render(cache, dev))
-        train = [merge_examples(train[i::MIXES_PER_BATCH]) for i in range(MIXES_PER_BATCH)]
-        train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
-
-        c.train(mode=True)
-        for step in range(STEPS_PER_BATCH):
-            opt.zero_grad()
-            log.add_scalar('training loss', l := loss(c(train_tensor), train, dev), n := global_step(epoch, batch, step))
-            if step == 0: log.add_scalar('batch start training loss', l, n)
-            if step == STEPS_PER_BATCH-1: log.add_scalar('batch end training loss', l, n)
-            l.backward()
-            opt.step()
-        c.train(mode=False)
-
-        with torch.no_grad():
-            classifications = c(test_tensor)
-            ls = losses(classifications, test, dev).to('cpu')
-
-            log.add_scalar('test loss', torch.sum(ls)/ls.shape[0], n)
-            if not (n//STEPS_PER_BATCH) % BATCHES_PER_RECONSTRUCTION:
-                classifications = classifications.to('cpu')
-                _, indices = torch.sort(ls)
-                clean_h, clean_w, _ = test[0].clean_image.shape
-                filtered_h, filtered_w, _ = test[0].filtered_image.shape
-                h = clean_h + filtered_h
-                w = max(2*clean_w, filtered_w)
-
-                reconstructions = numpy.zeros((10, h, w, 3), dtype=numpy.uint8)
-                for i in [0, 1, 2, 3, 4, -5, -4, -3, -2, -1]:
-                    reconstructions[i, :clean_h, :clean_w, :] = test[indices[i]].clean_image
-                    reconstructions[i, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[i]]).render(cache)
-                    reconstructions[i, clean_h:, :filtered_w, :] = test[indices[i]].filtered_image
-                # OpenCV uses BGR by default, tensorboardX uses RGB by default
-                reconstructions = numpy.flip(reconstructions, 3)
-                log.add_images('good reconstructions', reconstructions[:5], n, dataformats='NHWC')
-                log.add_images('bad reconstructions', reconstructions[5:], n, dataformats='NHWC')
-
-    lr_schedule.step()
+# 
+# EPOCHS=100
+# BATCHES_PER_EPOCH=100
+# STEPS_PER_BATCH=15
+# MIXES_PER_BATCH=60
+# EXAMPLES_PER_MIX=2
+# TEST_EXAMPLES=180
+# BATCHES_PER_RECONSTRUCTION=40
+# 
+# test = []
+# for _ in range(TEST_EXAMPLES):
+#     test.append(scenes.select().render(cache, dev))
+# test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
+# 
+# for epoch in range(EPOCHS):
+#     for batch in range(BATCHES_PER_EPOCH):
+#         train = []
+#         for _ in range(EXAMPLES_PER_MIX*MIXES_PER_BATCH):
+#             train.append(scenes.select().render(cache, dev))
+#         train = [merge_examples(train[i::MIXES_PER_BATCH]) for i in range(MIXES_PER_BATCH)]
+#         train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
+# 
+#         c.train(mode=True)
+#         for step in range(STEPS_PER_BATCH):
+#             opt.zero_grad()
+#             log.add_scalar('training loss', l := loss(c(train_tensor), train, dev), n := global_step(epoch, batch, step))
+#             if step == 0: log.add_scalar('batch start training loss', l, n)
+#             if step == STEPS_PER_BATCH-1: log.add_scalar('batch end training loss', l, n)
+#             l.backward()
+#             opt.step()
+#         c.train(mode=False)
+# 
+#         with torch.no_grad():
+#             classifications = c(test_tensor)
+#             ls = losses(classifications, test, dev).to('cpu')
+# 
+#             log.add_scalar('test loss', torch.sum(ls)/ls.shape[0], n)
+#             if not (n//STEPS_PER_BATCH) % BATCHES_PER_RECONSTRUCTION:
+#                 classifications = classifications.to('cpu')
+#                 _, indices = torch.sort(ls)
+#                 clean_h, clean_w, _ = test[0].clean_image.shape
+#                 filtered_h, filtered_w, _ = test[0].filtered_image.shape
+#                 h = clean_h + filtered_h
+#                 w = max(2*clean_w, filtered_w)
+# 
+#                 reconstructions = numpy.zeros((10, h, w, 3), dtype=numpy.uint8)
+#                 for i in [0, 1, 2, 3, 4, -5, -4, -3, -2, -1]:
+#                     reconstructions[i, :clean_h, :clean_w, :] = test[indices[i]].clean_image
+#                     reconstructions[i, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[i]]).render(cache)
+#                     reconstructions[i, clean_h:, :filtered_w, :] = test[indices[i]].filtered_image
+#                 # OpenCV uses BGR by default, tensorboardX uses RGB by default
+#                 reconstructions = numpy.flip(reconstructions, 3)
+#                 log.add_images('good reconstructions', reconstructions[:5], n, dataformats='NHWC')
+#                 log.add_images('bad reconstructions', reconstructions[5:], n, dataformats='NHWC')
+# 
+#     lr_schedule.step()
