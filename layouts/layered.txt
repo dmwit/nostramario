@@ -58,6 +58,45 @@
 	12, 124 !magnifier-bry-1.png
 	184, 56 !doc-rest.png; doc-throw.png; doc-hold.png
 
+2p:
+	# TODO: lost, won, tied
+	# 2p speed
+	hi:
+		2p-hi.png
+	med:
+		2p-med.png
+	low:
+		2p-low.png
+
+	# 1p level
+	109, 36 2p-k0.png; 2p-k1.png; 2p-k2.png
+	117, 36 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+
+	# 2p level
+	132, 36 2p-k0.png; 2p-k1.png; 2p-k2.png
+	140, 36 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+
+	# 1p speed
+	96, 48 2p-khi.png; 2p-kmed.png; 2p-klow.png
+
+	# crowns
+	112, 88 !crowns-bg1.png; crowns-bg2.png
+	112, 88 0-crowns.png; 1-crowns.png; 2-crowns.png; 3-crowns.png
+	128, 88 0-crowns.png; 1-crowns.png; 2-crowns.png; 3-crowns.png
+
+	# 1p virus count
+	110, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+	118, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png; 2p-k9.png
+
+	# 2p virus count
+	131, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+	139, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png; 2p-k9.png
+
+	32 , 72 8x16 playfield
+	160, 72 8x16 playfield
+	56 , 44 0 1p lookahead
+	184, 44 0 2p lookahead
+
 select:
 	level-select.png
 
@@ -109,4 +148,4 @@ select:
 
 		80,  32 !w2.png
 
-# TODO: 2p, other (like start screen, %5 cutscenes, endgame animation, maybe some of the garbage stuff we captured in the screens directory?)
+# TODO: other (like start screen, %5 cutscenes, endgame animation, maybe some of the garbage stuff we captured in the screens directory?)
