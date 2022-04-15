@@ -147,5 +147,7 @@ select:
 		89, 144 2p-select-low.png; 2p-select-med.png; 2p-select-hi.png
 
 		80,  32 !w2.png
-
-# TODO: other (like start screen, %5 cutscenes, endgame animation, maybe some of the garbage stuff we captured in the screens directory?)
+other:
+	empty-background.png
+	# TODO: capture more of the %5 cutscenes and put them in other-screens
+	0, 0 directories other-screens; $

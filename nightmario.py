@@ -13,7 +13,7 @@ import torch
 from dataclasses import dataclass
 from os import path, walk
 from torch import nn
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 np_rng = numpy.random.default_rng()
 
@@ -68,6 +68,44 @@ class ImageLayerSelection:
 
     def render(self, cache, image):
         cache.load(self.image).at(image, self.pos)
+
+@dataclass(frozen=True)
+class ImageDirectoryLayer:
+    pos: Position
+    directories: List[str]
+
+    def parameter_count(self): return 0
+    def onehot_ranges(self, offset): return []
+
+    def select(self, offset, params):
+        return ImageDirectoryLayerSelection(self.pos, load_random_photo(random.choice(self.directories)))
+
+    def reconstruct(self, offset, params):
+        directories = self.directories
+        while directories:
+            _, directories, files = walk(directories[0]).__next__()
+        return ImageDirectoryLayerSelection(self.pos, TemplateCache.load(files[0]).image)
+
+@dataclass(frozen=True)
+class ImageDirectoryLayerSelection:
+    pos: Position
+    image: numpy.ndarray
+
+    def __init__(self, pos, image):
+        if len(image.shape) == 2:
+            image = numpy.repeat(image[:, :, numpy.newaxis], 3, axis=2)
+        if image.shape[2] == 4:
+            image = image[:, :, 0:3]
+
+        object.__setattr__(self, 'pos', pos)
+        object.__setattr__(self, 'image', image)
+
+    def render(self, cache, image):
+        sh, sw, _ = self.image.shape
+        th, tw, _ = image.shape
+        ah, aw = th - self.pos.y, tw - self.pos.x
+        h, w = min(sh, ah), min(sw, aw)
+        image[slice_size(self.pos.y, h), slice_size(self.pos.x, w), :] = self.image[:h, :w, :]
 
 @dataclass(frozen=True)
 class Image:
@@ -559,7 +597,7 @@ class SceneSelection:
 class SceneTree:
     background: Optional[str]
     children: List[Tuple[str, 'SceneTree']]
-    layers: List[ImageLayer]
+    layers: List[Union[ImageLayer, ImageDirectoryLayer]]
     playfields: List[Playfield]
     lookaheads: Dict[str, Lookahead]
     _scene_parameters: Optional[List[int]] = None
@@ -688,7 +726,7 @@ def merge_examples(es):
 
 def slice_size(start, length): return slice(start, start+length)
 
-LOCATED_REGEX = re.compile('([1-9][0-9]*)[ \t]*,[ \t]*([1-9][0-9]*)[ \t]*(.+)')
+LOCATED_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*,[ \t]*(0|[1-9][0-9]*)[ \t]*(.+)')
 PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*playfield')
 LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead')
 def parse_scene_tree(line_source, parent_indent=None):
@@ -726,6 +764,11 @@ def parse_scene_tree(line_source, parent_indent=None):
                 elif match := LOOKAHEAD_REGEX.fullmatch(thing):
                     la = t.lookaheads.setdefault(match.group(2), Lookahead())
                     la += Lookahead(int(match.group(1)), pos)
+                elif thing.startswith('directories'):
+                    t.layers.append(ImageDirectoryLayer(pos, [
+                        PHOTOS_DIR if (d := directory.strip()) == '$' else d
+                        for directory in thing[11:].split(';')
+                        ]))
                 else:
                     learn = thing[0] != '!'
                     if not learn: thing = thing[1:]
@@ -856,8 +899,7 @@ def filter_linear_gradient(image):
     return numpy.around(mask*image0 + (1-mask)*image1).astype(numpy.uint8)
 
 PHOTOS_DIR = "/slow/dmwit/imagenet/ILSVRC/Data/CLS-LOC/train"
-def load_random_photo():
-    directory = PHOTOS_DIR
+def load_random_photo(directory = PHOTOS_DIR):
     while True:
         _, directories, files = walk(directory).__next__()
         if directories and files: raise Exception(f'Error when loading a random image: directory {directory} has both files and directories.')
