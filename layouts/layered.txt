@@ -1,37 +1,49 @@
-# TODO: weights (e.g. to bias towards putting the lookahead inside the lookahead box instead of in its animation)
-1p:
+1p (100):
 	# TODO: lost
-	hi:
+	hi (40):
 		1p-hi.png
-	med:
+	med (30):
 		1p-med.png
-	low:
+	low (1):
 		1p-low.png
 
 	# top score
-	16, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
-	24, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	# Benford's law... sort of
+	16, 56 1p-k0.png (54); 1p-k1.png (30); 1p-k2.png (18); 1p-k3.png (12); 1p-k4.png (10); 1p-k5.png (8); 1p-k6.png (7); 1p-k7.png (6); 1p-k8.png (5); 1p-k9.png (4)
+	24, 56 1p-k0.png (12); 1p-k1.png (11); 1p-k2.png (11); 1p-k3.png (10); 1p-k4.png (10); 1p-k5.png (10); 1p-k6.png (9); 1p-k7.png (9); 1p-k8.png (9); 1p-k9.png (8)
 	32, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 	40, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 	48, 56 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	# current score
-	16, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
-	24, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	# let's say a typical game goes to 1.5M; then about 2/3 of it is spent
+	# below 1M. but let's also at least let it occasionally train on bigger
+	# numbers, too
+	16, 80 1p-k0.png (20); 1p-k1.png (10); 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	# Benford's law says smaller numbers are more likely for the first digit of
+	# the score, and this is frequently the first digit of the score
+	24, 80 1p-k0.png (3); 1p-k1.png (3); 1p-k2.png (3); 1p-k3.png (2); 1p-k4.png (2); 1p-k5.png (2); 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 	32, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 	40, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 	48, 80 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	# level
-	216, 144 1p-k0.png; 1p-k1.png; 1p-k2.png
-	224, 144 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
+	# let's say a typical speedrun is 15 minutes 0-9, 30 minutes 10-19, 3
+	# minutes 20; but then bump up the probabilities for 20-24 a bit because
+	# sometimes folks like to do 20 HIs
+	216, 144 1p-k0.png (5); 1p-k1.png (15); 1p-k2.png (2)
+	224, 144 1p-k0.png (30); 1p-k1.png (32); 1p-k2.png (32); 1p-k3.png (32); 1p-k4.png (33); 1p-k5.png (20); 1p-k6.png (20); 1p-k7.png (20); 1p-k8.png (20); 1p-k9.png (20)
 
 	# virus count
-	216, 192 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png
+	# each time we hit x as the top digit, we're pretty much guaranteed to hit 0..x-1, which makes a triangular probability distribution
+	216, 192 1p-k0.png (9); 1p-k1.png (8); 1p-k2.png (7); 1p-k3.png (6); 1p-k4.png (5); 1p-k5.png (4); 1p-k6.png (3); 1p-k7.png (2); 1p-k8.png
 	224, 192 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
 	96, 72 8x16 playfield
-	190, 62 0 1p lookahead
+	# I don't know how many frames a typical pill takes to place + await drop
+	# time and the like; probably placement is 40-60 frames, so start there and
+	# add a little
+	190, 62 0 1p lookahead (80)
 	194, 53 1 1p lookahead
 	192, 43 1 1p lookahead
 	184, 40 2 1p lookahead
@@ -56,40 +68,44 @@
 
 	# TODO: magnifiers in more rotations, with other virus animation parity, with some missing, with some on their backs from a clear
 	12, 124 !magnifier-bry-1.png
-	184, 56 !doc-rest.png; doc-throw.png; doc-hold.png
+	184, 56 !doc-rest.png (16); doc-throw.png (5); doc-hold.png (80)
 
-2p:
+2p (60):
 	# TODO: lost, won, tied
 	# 2p speed
-	hi:
+	hi (20):
 		2p-hi.png
-	med:
+	med (80):
 		2p-med.png
-	low:
+	low (1):
 		2p-low.png
 
+	# people almost always play at level 14
 	# 1p level
-	109, 36 2p-k0.png; 2p-k1.png; 2p-k2.png
-	117, 36 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+	109, 36 2p-k0.png (2); 2p-k1.png (20); 2p-k2.png
+	117, 36 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png (20); 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
 
 	# 2p level
-	132, 36 2p-k0.png; 2p-k1.png; 2p-k2.png
-	140, 36 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+	132, 36 2p-k0.png (2); 2p-k1.png (20); 2p-k2.png
+	140, 36 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png (20); 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
 
 	# 1p speed
-	96, 48 2p-khi.png; 2p-kmed.png; 2p-klow.png
+	96, 48 2p-khi.png (20); 2p-kmed.png (80); 2p-klow.png (1)
 
 	# crowns
 	112, 88 !crowns-bg1.png; crowns-bg2.png
-	112, 88 0-crowns.png; 1-crowns.png; 2-crowns.png; 3-crowns.png
-	128, 88 0-crowns.png; 1-crowns.png; 2-crowns.png; 3-crowns.png
+	# people don't stay on the game screen for very long after somebody's won,
+	# so deemphasize showing 3 crowns
+	112, 88 0-crowns.png (5); 1-crowns.png (5); 2-crowns.png (5); 3-crowns.png
+	128, 88 0-crowns.png (5); 1-crowns.png (5); 2-crowns.png (5); 3-crowns.png
 
+	# level 14 starts with 60 viruses
 	# 1p virus count
-	110, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+	110, 184 2p-k0.png (20); 2p-k1.png (20); 2p-k2.png (20); 2p-k3.png (20); 2p-k4.png (20); 2p-k5.png (20); 2p-k6.png (2); 2p-k7.png; 2p-k8.png
 	118, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png; 2p-k9.png
 
 	# 2p virus count
-	131, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png
+	131, 184 2p-k0.png (20); 2p-k1.png (20); 2p-k2.png (20); 2p-k3.png (20); 2p-k4.png (20); 2p-k5.png (20); 2p-k6.png (2); 2p-k7.png; 2p-k8.png
 	139, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png; 2p-k9.png
 
 	32 , 72 8x16 playfield
@@ -97,20 +113,20 @@
 	56 , 44 0 1p lookahead
 	184, 44 0 2p lookahead
 
-select:
+select (10):
 	level-select.png
 
-	40, 48 select-virus-level.png; select-speed.png; select-music-type.png
+	40, 48 select-virus-level.png (20); select-speed.png (2); select-music-type.png
 
-	87, 77 1p-select-00.png; 1p-select-01.png; 1p-select-02.png; 1p-select-03.png; 1p-select-04.png; 1p-select-05.png; 1p-select-06.png; 1p-select-07.png; 1p-select-08.png; 1p-select-09.png; 1p-select-10.png; 1p-select-11.png; 1p-select-12.png; 1p-select-13.png; 1p-select-14.png; 1p-select-15.png; 1p-select-16.png; 1p-select-17.png; 1p-select-18.png; 1p-select-19.png; 1p-select-20.png
-	184, 72 w0.png; w1.png; w2.png
-	192, 72 w0.png; w1.png; w2.png; w3.png; w4.png; w5.png; w6.png; w7.png; w8.png; w9.png
+	87, 77 1p-select-00.png; 1p-select-01.png; 1p-select-02.png; 1p-select-03.png; 1p-select-04.png; 1p-select-05.png; 1p-select-06.png; 1p-select-07.png; 1p-select-08.png; 1p-select-09.png; 1p-select-10.png; 1p-select-11.png; 1p-select-12.png; 1p-select-13.png; 1p-select-14.png (20); 1p-select-15.png; 1p-select-16.png; 1p-select-17.png; 1p-select-18.png; 1p-select-19.png; 1p-select-20.png
+	184, 72 w0.png; w1.png (20); w2.png
+	192, 72 w0.png; w1.png; w2.png; w3.png; w4.png (20); w5.png; w6.png; w7.png; w8.png; w9.png
 
-	89, 129 1p-select-low.png; 1p-select-med.png; 1p-select-hi.png
+	89, 129 1p-select-low.png; 1p-select-med.png (80); 1p-select-hi.png (20)
 
 	59, 179 select-fever.png; select-chill.png; select-off.png
 
-	1p:
+	1p (5):
 		64 ,  88 !k .png
 		64 , 140 !k .png
 		72 ,  88 !k .png
@@ -132,22 +148,22 @@ select:
 		87,  91 !2p-select-no-level.png
 		89, 144 !2p-select-no-speed.png
 
-	2p:
+	2p (3):
 		# level selection
 		64 , 88 !w2.png
 		72 , 88 !wp.png
 		176, 88 !2p-level-frame.png
-		87 , 91 2p-select-00.png; 2p-select-01.png; 2p-select-02.png; 2p-select-03.png; 2p-select-04.png; 2p-select-05.png; 2p-select-06.png; 2p-select-07.png; 2p-select-08.png; 2p-select-09.png; 2p-select-10.png; 2p-select-11.png; 2p-select-12.png; 2p-select-13.png; 2p-select-14.png; 2p-select-15.png; 2p-select-16.png; 2p-select-17.png; 2p-select-18.png; 2p-select-19.png; 2p-select-20.png
-		184, 96 w0.png; w1.png; w2.png
-		192, 96 w0.png; w1.png; w2.png; w3.png; w4.png; w5.png; w6.png; w7.png; w8.png; w9.png
+		87 , 91 2p-select-00.png; 2p-select-01.png; 2p-select-02.png; 2p-select-03.png; 2p-select-04.png; 2p-select-05.png; 2p-select-06.png; 2p-select-07.png; 2p-select-08.png; 2p-select-09.png; 2p-select-10.png; 2p-select-11.png; 2p-select-12.png; 2p-select-13.png; 2p-select-14.png (20); 2p-select-15.png; 2p-select-16.png; 2p-select-17.png; 2p-select-18.png; 2p-select-19.png; 2p-select-20.png
+		184, 96 w0.png; w1.png (20); w2.png
+		192, 96 w0.png; w1.png; w2.png; w3.png; w4.png (20); w5.png; w6.png; w7.png; w8.png; w9.png
 
 		# speed selection
 		64, 140 !w2.png
 		72, 140 !wp.png
-		89, 144 2p-select-low.png; 2p-select-med.png; 2p-select-hi.png
+		89, 144 2p-select-low.png; 2p-select-med.png (80); 2p-select-hi.png (20)
 
 		80,  32 !w2.png
-other:
+other (1):
 	empty-background.png
 	# TODO: capture more of the %5 cutscenes and put them in other-screens
 	0, 0 directories other-screens; $

@@ -13,9 +13,68 @@ import torch
 from dataclasses import dataclass
 from os import path, walk
 from torch import nn
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, Generic, List, Optional, Set, Tuple, TypeVar, Union
 
 np_rng = numpy.random.default_rng()
+T = TypeVar('T')
+
+# Sample from a distribution specified by a list of values and a positive
+# integer weight for each using a variant of the alias method. Advantages of
+# the approach used here:
+#
+# * O(1) sampling, which is asymptotically better than the O(log n) you'd
+#   get from the obvious binary search algorithm.
+# * Sampling only requires the generation of a single integer, which
+#   potentially consumes many fewer random bits than generating a uniform float
+#   in [0, 1) as needed by the standard alias method.
+# * No floating point arithmetic (nor fixed-point arithmetic), and in
+#   particular no rounding; all calculations are exact. No bias, and no
+#   distribution with an outcome so unlikely that it cannot be selected due to
+#   rounding errors. (Admittedly this latter part is a bit theoretical in that
+#   outcomes so unlikely that they get skipped by rounding errors are
+#   incredibly unlikely to get generated anyway...)
+# * O(n) precomputation. The popular O(n*log(n)) variant uses a greedy
+#   algorithm to decrease how often you reject the default half of a bucket.
+#   Since this stores both default and rejection values in a single list, that
+#   optimization is not needed; there is no additional indexing stemming from a
+#   rejection.
+class Categorical(Generic[T]):
+    def __init__(self, dist):
+        self._buckets: List[Tuple[int, (int, T), (int, T)]] = []
+        # TODO: divide all the p's by the gcd of all the p's
+        self._denominator: int = math.lcm(len(dist), p_sum := sum(p for p, _ in dist))
+        self._bucket_size: int = self._denominator // len(dist)
+        self.values: Tuple[T, ...] = tuple(v for _, v in dist)
+        scaling = self._denominator // p_sum
+        overfull = []
+        underfull = []
+
+        def place(p, val):
+            if p < self._bucket_size:
+                underfull.append((p, val))
+            elif p == self._bucket_size:
+                self._buckets.append((p, val, val))
+            else: # p > self._bucket_size
+                overfull.append((p, val))
+        for i, (p, val) in enumerate(dist): place(scaling*p, (i, val))
+
+        while underfull:
+            p_small, val_small = underfull.pop()
+            p_large, val_large = overfull.pop()
+            self._buckets.append((p_small, val_small, val_large))
+            place(p_large + p_small - self._bucket_size, val_large)
+
+        assert(not overfull)
+
+    def select(self) -> T: return self.select_with_index()[1]
+    def select_with_index(self) -> Tuple[int, T]:
+        bucket, residue = divmod(random.randrange(self._denominator), self._bucket_size)
+        p, lo, hi = self._buckets[bucket]
+        return lo if residue < p else hi
+
+    def map(self, f):
+        self.values = tuple(map(f, self.values))
+        self._buckets = list((w, (i_lo, f(v_lo)), (i_hi, f(v_hi))) for w, (i_lo, v_lo), (i_hi, v_hi) in self._buckets)
 
 @dataclass(frozen=True)
 class Position:
@@ -42,24 +101,24 @@ Position.EVERY_WHICH_WAY = (Position.LEFT, Position.RIGHT, Position.UP, Position
 class ImageLayer:
     pos: Position
     learn: bool
-    images: List[str]
+    images: Categorical[str]
 
     def parameter_count(self):
-        return len(self.images) if self.learn else 0
+        return len(self.images.values) if self.learn else 0
 
     def onehot_ranges(self, offset):
-        return [slice_size(offset, len(self.images))] if self.learn else []
+        return [slice_size(offset, len(self.images.values))] if self.learn else []
 
     def select(self, offset, params):
-        i = random.randrange(len(self.images))
+        i, image = self.images.select_with_index()
         if self.learn: params[offset+i] = 1
-        return ImageLayerSelection(self.pos, self.images[i])
+        return ImageLayerSelection(self.pos, image)
 
     def reconstruct(self, offset, params):
         return \
-            ImageLayerSelection(self.pos, reconstruct_list(params, offset, self.images)) \
+            ImageLayerSelection(self.pos, reconstruct_list(params, offset, self.images.values)) \
             if self.learn else \
-            ImageLayerSelection(self.pos, self.images[0])
+            ImageLayerSelection(self.pos, self.images.values[0])
 
 @dataclass(frozen=True)
 class ImageLayerSelection:
@@ -72,19 +131,22 @@ class ImageLayerSelection:
 @dataclass(frozen=True)
 class ImageDirectoryLayer:
     pos: Position
-    directories: List[str]
+    directories: Categorical[str]
+
+    def __post_init__(self):
+        self.directories.map(lambda d: PHOTOS_DIR if d == '$' else d)
 
     def parameter_count(self): return 0
     def onehot_ranges(self, offset): return []
 
     def select(self, offset, params):
-        return ImageDirectoryLayerSelection(self.pos, load_random_photo(random.choice(self.directories)))
+        return ImageDirectoryLayerSelection(self.pos, load_random_photo(self.directories.select()))
 
     def reconstruct(self, offset, params):
-        directories = self.directories
+        directories = self.directories.values
         while directories:
             _, directories, files = walk(directories[0]).__next__()
-        return ImageDirectoryLayerSelection(self.pos, TemplateCache.load(files[0]).image)
+        return ImageDirectoryLayerSelection(self.pos, TemplateCache().load(files[0]).image)
 
 @dataclass(frozen=True)
 class ImageDirectoryLayerSelection:
@@ -487,10 +549,12 @@ class PlayfieldSelection:
 @dataclass
 class Lookahead:
     # the int is how many clockwise rotations the pill has
-    rotations_and_positions: List[Tuple[int, Position]]
+    rotations_and_positions: List[Tuple[int, Tuple[int, Position]]]
+    _dist: Union[None, Categorical[Tuple[int, Position]]]
 
-    def __init__(self, rot=None, pos=None):
-        self.rotations_and_positions = [] if rot is None or pos is None else [(rot, pos)]
+    def __init__(self, rot=None, pos=None, weight=1):
+        self.rotations_and_positions = [] if rot is None or pos is None else [(weight, (rot, pos))]
+        self._dist = None
 
     def __add__(self, other):
         result = Lookahead()
@@ -499,6 +563,11 @@ class Lookahead:
 
     def __iadd__(self, other):
         self.rotations_and_positions += other.rotations_and_positions
+        self._dist = None
+
+    def dist(self):
+        if self._dist is None: self._dist = Categorical(self.rotations_and_positions)
+        return self._dist
 
     def parameter_count(self):
         return 2*Cell.NUM_COLORS
@@ -507,7 +576,7 @@ class Lookahead:
         colors = [random.randrange(Cell.NUM_COLORS), random.randrange(Cell.NUM_COLORS)]
         params[offset + colors[0]] = 1
         params[offset + Cell.NUM_COLORS + colors[1]] = 1
-        return LookaheadSelection(colors, *random.choice(self.rotations_and_positions), frame_parity)
+        return LookaheadSelection(colors, *self.dist().select(), frame_parity)
 
     def onehot_ranges(self, offset):
         # abbreviation
@@ -517,7 +586,7 @@ class Lookahead:
     def reconstruct(self, offset, params):
         N = Cell.NUM_COLORS
         colors = [reconstruct_onehot(params, offset, N), reconstruct_onehot(params, offset+N, N)]
-        return LookaheadSelection(colors, *self.rotations_and_positions[0], 0)
+        return LookaheadSelection(colors, *self.dist().values[0], 0)
 
 @dataclass(frozen=True)
 class LookaheadSelection:
@@ -549,7 +618,7 @@ class Scene:
     name: List[str]
     index: int
     background: str
-    layers: List[Tuple[int, ImageLayer]]
+    layers: List[Tuple[int, Union[ImageLayer, ImageDirectoryLayer]]]
     playfields: List[Tuple[int, Playfield]]
     lookaheads: Dict[str, Tuple[int, Lookahead]]
     parameter_count: int
@@ -581,7 +650,7 @@ class Scene:
 class SceneSelection:
     name: List[str]
     background: str
-    layers: List[ImageLayerSelection]
+    layers: List[Union[ImageLayerSelection, ImageDirectoryLayerSelection]]
     playfields: List[PlayfieldSelection]
     lookaheads: Dict[str, LookaheadSelection]
 
@@ -596,7 +665,7 @@ class SceneSelection:
 @dataclass
 class SceneTree:
     background: Optional[str]
-    children: List[Tuple[str, 'SceneTree']]
+    children: List[Tuple[str, int, 'SceneTree']]
     layers: List[Union[ImageLayer, ImageDirectoryLayer]]
     playfields: List[Playfield]
     lookaheads: Dict[str, Lookahead]
@@ -605,9 +674,9 @@ class SceneTree:
 
     def flatten(self):
         # [x] is a bit like a mutable version of x
-        yield from self._flatten(None, [], [], [], {}, [0], self.parameter_count(), self.scene_parameters())
+        yield from self._flatten(None, [], [], [], {}, [0], self.parameter_count(), self.scene_parameters(), self._denominator())
 
-    def _flatten(self, bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters):
+    def _flatten(self, bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters, weight):
         if bg is None: bg = self.background
         elif self.background is not None:
             raise Exception(f"Ambiguous background in {nm}; it was specified here as {self.background} and in an ancestor as {bg}.")
@@ -629,14 +698,15 @@ class SceneTree:
                 lookaheads[k] = index[0], la
                 index[0] += la.parameter_count()
 
-        for child_nm, child_t in self.children:
+        scaling = sum(child_weight for _, child_weight, _ in self.children) or 1
+        for child_nm, child_weight, child_t in self.children:
             nm.append(child_nm)
-            yield from child_t._flatten(bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters)
+            yield from child_t._flatten(bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters, (weight * child_weight) // scaling)
             nm.pop()
 
         if not self.children:
             if bg is None: raise Exception(f"No background specified for {nm}.")
-            yield Scene(list(nm), index[0], bg, list(layers), list(playfields), lookaheads, parameter_count, scene_parameters)
+            yield (weight, Scene(list(nm), index[0], bg, list(layers), list(playfields), lookaheads, parameter_count, scene_parameters))
             index[0] += 1
 
         # -0 is 0, so we need a conditional
@@ -650,7 +720,7 @@ class SceneTree:
                 + sum(layer.parameter_count() for layer in self.layers)
                 + sum(playfield.parameter_count() for playfield in self.playfields)
                 + sum(lookahead.parameter_count() for lookahead in self.lookaheads.values())
-                + sum(child.parameter_count() for _, child in self.children)
+                + sum(child.parameter_count() for _, _, child in self.children)
                 )
         return self._parameter_count
 
@@ -665,7 +735,7 @@ class SceneTree:
         index += sum(playfield.parameter_count() for playfield in self.playfields)
         index += sum(lookahead.parameter_count() for lookahead in self.lookaheads.values())
 
-        for _, child in self.children:
+        for _, _, child in self.children:
             index = child._initialize_scene_parameters(indices, index)
 
         if not self.children:
@@ -674,16 +744,26 @@ class SceneTree:
 
         return index
 
+    def _denominator(self): return math.lcm(*self._denominators(1))
+    def _denominators(self, parent_denom):
+        if not self.children:
+            if parent_denom:
+                yield parent_denom
+        else:
+            self_denom = sum(child_weight for _, child_weight, _ in self.children) or 1
+            for _, _, child in self.children:
+                yield from child._denominators(parent_denom*self_denom)
+
 class Scenes:
     def __init__(self, scene_tree):
-        self.list = list(scene_tree.flatten())
-        self.indices = [scene.index for scene in self.list]
+        scenes = list(scene_tree.flatten())
+        self.dist = Categorical(scenes)
+        self.indices = [scene.index for scene in self.dist.values]
 
-    def select(self):
-        return random.choice(self.list)
+    def select(self): return self.dist.select()
 
     def reconstruct(self, params):
-        scene = reconstruct_list(params[self.indices], 0, self.list)
+        scene = reconstruct_list(params[self.indices], 0, self.dist.values)
         return SceneSelection(scene.name, scene.background,
             [layer.reconstruct(i, params) for i, layer in scene.layers],
             [playfield.reconstruct(i, params) for i, playfield in scene.playfields],
@@ -726,9 +806,10 @@ def merge_examples(es):
 
 def slice_size(start, length): return slice(start, start+length)
 
+NAME_REGEX = re.compile('([^\r\n]+?)([ \t]*\(([1-9][0-9]*)\))?[ \t]*:')
 LOCATED_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*,[ \t]*(0|[1-9][0-9]*)[ \t]*(.+)')
 PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*playfield')
-LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead')
+LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead([ \t]*\(([1-9][0-9]*)\))?')
 def parse_scene_tree(line_source, parent_indent=None):
     t = SceneTree(None, [], [], [], {})
     self_indent = None
@@ -752,10 +833,9 @@ def parse_scene_tree(line_source, parent_indent=None):
                 else:
                     raise Exception(f"Indentation error. Expected <{self_indent}> or a prefix of <{parent_indent}>, but saw <{here_indent}>.")
 
-            if content.endswith(':'):
-                name = content[:-1]
+            if match := NAME_REGEX.fullmatch(content):
                 here_indent, content, child = parse_scene_tree(line_source, self_indent)
-                t.children.append((name, child))
+                t.children.append((match.group(1), weight_from_group(match.group(3)), child))
             elif match := LOCATED_REGEX.fullmatch(content):
                 pos = Position(int(match.group(1)), int(match.group(2)))
                 thing = match.group(3)
@@ -763,16 +843,13 @@ def parse_scene_tree(line_source, parent_indent=None):
                     t.playfields.append(Playfield(pos, int(match.group(1)), int(match.group(2))))
                 elif match := LOOKAHEAD_REGEX.fullmatch(thing):
                     la = t.lookaheads.setdefault(match.group(2), Lookahead())
-                    la += Lookahead(int(match.group(1)), pos)
+                    la += Lookahead(int(match.group(1)), pos, weight_from_group(match.group(4)))
                 elif thing.startswith('directories'):
-                    t.layers.append(ImageDirectoryLayer(pos, [
-                        PHOTOS_DIR if (d := directory.strip()) == '$' else d
-                        for directory in thing[11:].split(';')
-                        ]))
+                    t.layers.append(ImageDirectoryLayer(pos, parse_categorical(thing[11:])))
                 else:
                     learn = thing[0] != '!'
                     if not learn: thing = thing[1:]
-                    t.layers.append(ImageLayer(pos, learn, [filename.strip() for filename in thing.split(';')]))
+                    t.layers.append(ImageLayer(pos, learn, parse_categorical(thing)))
                 break
             elif t.background == None:
                 t.background = content
@@ -781,6 +858,20 @@ def parse_scene_tree(line_source, parent_indent=None):
                 raise Exception(f"Attempted to set background to {content}, but there is already a background of {t.background}.")
 
     return ('', '', t)
+
+CATEGORICAL_REGEX = re.compile('[ \t]*(.+?)[ \t]*(\(([1-9][0-9]*)\))?[ \t]*')
+def parse_categorical(ss):
+    return Categorical([
+        ( weight_from_group((match := CATEGORICAL_REGEX.fullmatch(s)).group(3))
+        , match.group(1)
+        )
+        for s in ss.split(';')
+        ])
+
+def weight_from_group(s):
+    # don't use int(s or 1) in case s is '' for some weird reason
+    if s is None: return 1
+    return int(s)
 
 SPACE_REGEX = re.compile('([ \t]*)(.*[^ \t\r\n])?[ \t\r\n]*')
 def split_indentation(line):
@@ -1055,23 +1146,25 @@ with open('layouts/layered.txt') as f:
 scenes = Scenes(t)
 
 dev = torch.device('cuda')
-c = Classifier(t, dev)
+#c = Classifier(t, dev)
 cache = TemplateCache()
 # initialize the fully-connected layer
-with torch.no_grad(): c(torch.tensor(numpy.array([t.flatten().__next__().render(cache, dev).filtered_image]), device=dev))
-opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
-lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
-log = tx.SummaryWriter()
+#with torch.no_grad(): c(torch.tensor(numpy.array([t.flatten().__next__().render(cache, dev).filtered_image]), device=dev))
+#opt = torch.optim.SGD(c.parameters(), 0.01, momentum=0.9, weight_decay=0.00001)
+#lr_schedule = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
+#log = tx.SummaryWriter()
 
 while True:
-    for scene in scenes.list:
-        selection = scene.render(cache, dev)
-        cv2.imshow('-'.join(scene.name) + ' clean', selection.clean_image)
-        cv2.imshow('-'.join(scene.name) + ' filtered', selection.filtered_image)
-    if cv2.waitKey(10000) != 113:
+    # for scene in scenes.dist.values:
+    #     selection = scene.render(cache, dev)
+    #     cv2.imshow('-'.join(scene.name) + str(selection.clean_image.shape), selection.clean_image)
+    scene = scenes.select()
+    selection = scene.render(cache, dev)
+    cv2.imshow('clean', selection.clean_image)
+    cv2.imshow('filtered', selection.filtered_image)
+    if cv2.waitKey(100) == 113:
         break
 
-# 
 # EPOCHS=100
 # BATCHES_PER_EPOCH=100
 # STEPS_PER_BATCH=15
