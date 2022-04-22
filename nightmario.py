@@ -41,7 +41,7 @@ T = TypeVar('T')
 class Categorical(Generic[T]):
     def __init__(self, dist):
         self._buckets: List[Tuple[int, (int, T), (int, T)]] = []
-        # TODO: divide all the p's by the gcd of all the p's
+        # could divide all the p's by the gcd of all the p's but I'm lazy
         self._denominator: int = math.lcm(len(dist), p_sum := sum(p for p, _ in dist))
         self._bucket_size: int = self._denominator // len(dist)
         self.values: Tuple[T, ...] = tuple(v for _, v in dist)
