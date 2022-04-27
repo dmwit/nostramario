@@ -144,9 +144,11 @@ class ImageDirectoryLayer:
 
     def reconstruct(self, offset, params):
         directories = self.directories.values
+        directory = ''
         while directories:
-            _, directories, files = walk(directories[0]).__next__()
-        return ImageDirectoryLayerSelection(self.pos, TemplateCache().load(files[0]).image)
+            directory = path.join(directory, directories[0])
+            _, directories, files = walk(directory).__next__()
+        return ImageDirectoryLayerSelection(self.pos, load_exact_photo(path.join(directory, files[0])))
 
 @dataclass(frozen=True)
 class ImageDirectoryLayerSelection:
@@ -997,11 +999,14 @@ def load_random_photo(directory = PHOTOS_DIR):
         if directories:
             directory = path.join(directory, random.choice(directories))
         elif files:
-            background = cv2.imread(path.join(directory, random.choice(files)), cv2.IMREAD_UNCHANGED)
-            if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
-            return background
+            return load_exact_photo(path.join(directory, random.choice(files)))
         else:
             raise Exception(f'Error when loading a random image: directory {directory} is empty.')
+
+def load_exact_photo(filename):
+    background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+    if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
+    return background
 
 SCALING_METHODS = [cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_LANCZOS4]
 def noisy_scale(image):
