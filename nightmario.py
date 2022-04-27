@@ -1248,6 +1248,7 @@ while True:
     selection = scene.render(cache, dev)
     cv2.imshow('clean', selection.clean_image)
     cv2.imshow('filtered', selection.filtered_image)
+    cv2.imshow('reconstructed', scenes.reconstruct(selection.classification).render(cache))
     if cv2.waitKey(100) == 113:
         break
 
