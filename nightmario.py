@@ -91,6 +91,8 @@ class Position:
     def __neg__(self): return Position(-self.x, -self.y)
     def __sub__(self, other): return Position(self.x - other.x, self.y - other.y)
 
+    def round(self): return Position(round(self.x), round(self.y))
+
 Position.LEFT = Position(-1, 0)
 Position.RIGHT = Position(1, 0)
 Position.UP = Position(0, -1)
@@ -236,6 +238,72 @@ class Cell:
         return ImageLayerSelection(pos, self.template_name(frame_parity))
 
 EMPTY_CELL = Cell(Cell.BLUE, Cell.EMPTY)
+
+MAGNIFIER_VIRUS_RADIUS = 18
+MAGNIFIER_VIRUS_SIZE = 24
+MAGNIFIER_VIRUS_SQUIRM_OFFSETS = [5, 9, 12, 14, 15, 14, 12, 9, 5]
+MAGNIFIER_VIRUS_SQUIRM_LENGTH = 170 + len(MAGNIFIER_VIRUS_SQUIRM_OFFSETS)
+
+@dataclass(frozen=True)
+class Magnifier:
+    center: Position
+
+    def __post_init__(self):
+        object.__setattr__(self, 'center', self.center - Position(MAGNIFIER_VIRUS_SIZE/2., MAGNIFIER_VIRUS_SIZE/2.))
+
+    def parameter_count(self): return 0
+    def onehot_ranges(self, offset): return []
+    def select(self, offset, params):
+        theta = random.uniform(0, 2*math.pi)
+        viruses = []
+        for color in range(Cell.NUM_COLORS):
+            # sometimes don't draw a virus
+            if not random.randrange(30): continue
+            # 540: 3s/virus*60fps*3virus/virus of this color
+            frame = random.randrange(540)
+            # TODO: figure out and implement the actual NES logic, which surely does not calculate trig functions
+            dy = MAGNIFIER_VIRUS_SQUIRM_OFFSETS[frame] if frame < len(MAGNIFIER_VIRUS_SQUIRM_OFFSETS) else 0
+            local_theta = theta + 2*math.pi*color/Cell.NUM_COLORS
+            direction = Position(math.cos(local_theta), math.sin(local_theta))
+            viruses.append(MagnifierVirusSelection(
+                (self.center + MAGNIFIER_VIRUS_RADIUS*direction - Position(0, dy)).round(),
+                color,
+                frame < MAGNIFIER_VIRUS_SQUIRM_LENGTH,
+                ))
+        return MagnifierSelection(random.randrange(8), viruses)
+
+    def reconstruct(self, offset, params):
+        return MagnifierSelection(0, [])
+
+@dataclass(frozen=True)
+class MagnifierVirusSelection:
+    pos: Position
+    color: int
+    # TODO: laughing is also an option (when game is lost)
+    squirm: bool
+
+    NORMAL_TEMPLATES = ['lean-l', 'stand', 'lean-r', 'stand']
+    SQUIRM_TEMPLATES = ['lean', 'stand']
+
+    def render(self, cache, image, frame_parity):
+        color = Cell._COLOR_CHARS[self.color]
+        if self.squirm:
+            stance = 'squirm-'
+            animation = MagnifierVirusSelection.SQUIRM_TEMPLATES[(frame_parity >> 2) & 1]
+        else:
+            stance = ''
+            animation = MagnifierVirusSelection.NORMAL_TEMPLATES[frame_parity & 3]
+        template = f'magnifier-{color}x-{stance}{animation}.png'
+        cache.load(template).at(image, self.pos)
+
+@dataclass(frozen=True)
+class MagnifierSelection:
+    frame_parity: int
+    viruses: List[MagnifierVirusSelection]
+
+    def render(self, cache, image):
+        for virus in self.viruses:
+            virus.render(cache, image, self.frame_parity)
 
 # Information about the bottle, you know, the 8x16 grid of viruses and pills
 # and stuff.
@@ -623,6 +691,7 @@ class Scene:
     layers: List[Tuple[int, Union[ImageLayer, ImageDirectoryLayer]]]
     playfields: List[Tuple[int, Playfield]]
     lookaheads: Dict[str, Tuple[int, Lookahead]]
+    magnifiers: List[Tuple[int, Magnifier]]
     parameter_count: int
     alternative_indices: List[int]
 
@@ -633,6 +702,7 @@ class Scene:
             [layer.select(offset, params) for offset, layer in self.layers],
             [playfield.select(offset, params, frame_parity) for offset, playfield in self.playfields],
             {nm: lookahead.select(offset, params, frame_parity) for nm, (offset, lookahead) in self.lookaheads.items()},
+            [magnifier.select(offset, params) for offset, magnifier in self.magnifiers],
             )
 
     def render(self, cache, device):
@@ -645,6 +715,7 @@ class Scene:
         for playfield, (offset, _) in zip(selection.playfields, self.playfields):
             slices += playfield.onehot_ranges(offset)
         for offset, lookahead in self.lookaheads.values(): slices += lookahead.onehot_ranges(offset)
+        for offset, magnifier in self.magnifiers: slices += magnifier.onehot_ranges(offset)
 
         return TrainingExample(image, apply_filters(image), params.to(device), slices, self.alternative_indices)
 
@@ -655,12 +726,14 @@ class SceneSelection:
     layers: List[Union[ImageLayerSelection, ImageDirectoryLayerSelection]]
     playfields: List[PlayfieldSelection]
     lookaheads: Dict[str, LookaheadSelection]
+    magnifiers: List[MagnifierSelection]
 
     def render(self, cache):
         image = numpy.array(cache.load(self.background).image)
         for layer in self.layers: layer.render(cache, image)
         for playfield in self.playfields: playfield.render(cache, image)
         for lookahead in self.lookaheads.values(): lookahead.render(cache, image)
+        for magnifier in self.magnifiers: magnifier.render(cache, image)
         return image
 
 # the raw data, as close to the directly parsed form as possible
@@ -671,14 +744,15 @@ class SceneTree:
     layers: List[Union[ImageLayer, ImageDirectoryLayer]]
     playfields: List[Playfield]
     lookaheads: Dict[str, Lookahead]
+    magnifiers: List[Magnifier]
     _scene_parameters: Optional[List[int]] = None
     _parameter_count: Optional[int] = None
 
     def flatten(self):
         # [x] is a bit like a mutable version of x
-        yield from self._flatten(None, [], [], [], {}, [0], self.parameter_count(), self.scene_parameters(), self._denominator())
+        yield from self._flatten(None, [], [], [], {}, [], [0], self.parameter_count(), self.scene_parameters(), self._denominator())
 
-    def _flatten(self, bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters, weight):
+    def _flatten(self, bg, nm, layers, playfields, lookaheads, magnifiers, index, parameter_count, scene_parameters, weight):
         if bg is None: bg = self.background
         elif self.background is not None:
             raise Exception(f"Ambiguous background in {nm}; it was specified here as {self.background} and in an ancestor as {bg}.")
@@ -689,6 +763,9 @@ class SceneTree:
         for playfield in self.playfields:
             playfields.append((index[0], playfield))
             index[0] += playfield.parameter_count()
+        for magnifier in self.magnifiers:
+            magnifiers.append((index[0], magnifier))
+            index[0] += magnifier.parameter_count()
 
         # backing out the lookahead changes is too annoying, just do COW instead
         if self.lookaheads: lookaheads = dict(lookaheads)
@@ -703,17 +780,18 @@ class SceneTree:
         scaling = sum(child_weight for _, child_weight, _ in self.children) or 1
         for child_nm, child_weight, child_t in self.children:
             nm.append(child_nm)
-            yield from child_t._flatten(bg, nm, layers, playfields, lookaheads, index, parameter_count, scene_parameters, (weight * child_weight) // scaling)
+            yield from child_t._flatten(bg, nm, layers, playfields, lookaheads, magnifiers, index, parameter_count, scene_parameters, (weight * child_weight) // scaling)
             nm.pop()
 
         if not self.children:
             if bg is None: raise Exception(f"No background specified for {nm}.")
-            yield (weight, Scene(list(nm), index[0], bg, list(layers), list(playfields), lookaheads, parameter_count, scene_parameters))
+            yield (weight, Scene(list(nm), index[0], bg, list(layers), list(playfields), lookaheads, list(magnifiers), parameter_count, scene_parameters))
             index[0] += 1
 
         # -0 is 0, so we need a conditional
         if self.layers: del layers[-len(self.layers):]
         if self.playfields: del playfields[-len(self.playfields):]
+        if self.magnifiers: del magnifiers[-len(self.magnifiers):]
 
     def parameter_count(self):
         if self._parameter_count is None:
@@ -770,6 +848,7 @@ class Scenes:
             [layer.reconstruct(i, params) for i, layer in scene.layers],
             [playfield.reconstruct(i, params) for i, playfield in scene.playfields],
             {nm: lookahead.reconstruct(i, params) for nm, (i, lookahead) in scene.lookaheads.items()},
+            [magnifier.reconstruct(i, params) for i, magnifier in scene.magnifiers],
             )
 
 def reconstruct_onehot(params, offset, size):
@@ -813,7 +892,7 @@ LOCATED_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*,[ \t]*(0|[1-9][0-9]*)[ \t]*(.+
 PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*playfield')
 LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead([ \t]*\(([1-9][0-9]*)\))?')
 def parse_scene_tree(line_source, parent_indent=None):
-    t = SceneTree(None, [], [], [], {})
+    t = SceneTree(None, [], [], [], {}, [])
     self_indent = None
 
     for line in line_source:
@@ -846,6 +925,8 @@ def parse_scene_tree(line_source, parent_indent=None):
                 elif match := LOOKAHEAD_REGEX.fullmatch(thing):
                     la = t.lookaheads.setdefault(match.group(2), Lookahead())
                     la += Lookahead(int(match.group(1)), pos, weight_from_group(match.group(4)))
+                elif thing == 'magnifier':
+                    t.magnifiers.append(Magnifier(pos))
                 elif thing.startswith('directories'):
                     t.layers.append(ImageDirectoryLayer(pos, parse_categorical(thing[11:])))
                 else:

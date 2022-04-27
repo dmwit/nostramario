@@ -66,8 +66,7 @@
 	120, 67 2 1p lookahead
 	124, 68 3 1p lookahead
 
-	# TODO: magnifiers in more rotations, with other virus animation parity, with some missing, with some on their backs from a clear
-	12, 124 !magnifier-bry-1.png
+	44, 159 magnifier
 	184, 56 !doc-rest.png (16); doc-throw.png (5); doc-hold.png (80)
 
 2p (60):
