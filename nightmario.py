@@ -1319,9 +1319,9 @@ while(True):
                 reconstructions[i, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[i]]).render(cache)
                 reconstructions[i, clean_h:, :filtered_w, :] = test[indices[i]].filtered_image
             for i, j in enumerate(random.sample(list(range(5, indices.shape[0]-5)), 5)):
-                reconstructions[i, :clean_h, :clean_w, :] = test[indices[j]].clean_image
-                reconstructions[i, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[j]]).render(cache)
-                reconstructions[i, clean_h:, :filtered_w, :] = test[indices[j]].filtered_image
+                reconstructions[i+5, :clean_h, :clean_w, :] = test[indices[j]].clean_image
+                reconstructions[i+5, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[j]]).render(cache)
+                reconstructions[i+5, clean_h:, :filtered_w, :] = test[indices[j]].filtered_image
             # OpenCV uses BGR by default, tensorboardX uses RGB by default
             reconstructions = numpy.flip(reconstructions, 3)
             log.add_images('reconstructions/good', reconstructions[:5], n, dataformats='NHWC')
