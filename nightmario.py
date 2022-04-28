@@ -1,5 +1,6 @@
 import cv2
 import dataclasses
+import importlib
 import itertools
 import math
 import numpy
@@ -15,7 +16,7 @@ from os import path, walk
 from torch import nn
 from typing import Dict, Generic, List, Optional, Set, Tuple, TypeVar, Union
 
-from params import *
+import params
 
 np_rng = numpy.random.default_rng()
 T = TypeVar('T')
@@ -1227,11 +1228,11 @@ def loss(tensor, golden, device):
     return torch.sum(losses(tensor, golden, device))/max(len(golden), 1)
 
 def log_params(n):
-    log.add_scalar('hyperparameters/learning rate', LEARNING_RATE, n)
-    log.add_scalar('hyperparameters/momentum', MOMENTUM, n)
-    log.add_scalar('hyperparameters/weight decay', WEIGHT_DECAY, n)
-    log.add_scalar('hyperparameters/steps per batch', STEPS_PER_BATCH, n)
-    log.add_scalar('hyperparameters/examples per mix', EXAMPLES_PER_MIX, n)
+    log.add_scalar('hyperparameters/learning rate', params.LEARNING_RATE, n)
+    log.add_scalar('hyperparameters/momentum', params.MOMENTUM, n)
+    log.add_scalar('hyperparameters/weight decay', params.WEIGHT_DECAY, n)
+    log.add_scalar('hyperparameters/steps per batch', params.STEPS_PER_BATCH, n)
+    log.add_scalar('hyperparameters/examples per mix', params.EXAMPLES_PER_MIX, n)
 
 with open('layouts/layered.txt') as f:
     _, _, t = parse_scene_tree(f)
@@ -1241,7 +1242,7 @@ dev = torch.device('cuda')
 cache = TemplateCache()
 log = tx.SummaryWriter()
 try:
-    data = torch.load(MODEL_PATH)
+    data = torch.load(params.MODEL_PATH)
     c = data['model']
     n = data['training step']
     log_params(n)
@@ -1250,7 +1251,7 @@ except FileNotFoundError:
     # initialize the fully-connected layer
     with torch.no_grad(): c(torch.tensor(numpy.array([scenes.select().render(cache, dev).filtered_image]), device=dev))
     n = 0
-opt = torch.optim.SGD(c.parameters(), LEARNING_RATE, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
+opt = torch.optim.SGD(c.parameters(), params.LEARNING_RATE, momentum=params.MOMENTUM, weight_decay=params.WEIGHT_DECAY)
 
 # while True:
 #     scene = scenes.select()
@@ -1262,32 +1263,32 @@ opt = torch.optim.SGD(c.parameters(), LEARNING_RATE, momentum=MOMENTUM, weight_d
 #         break
 
 test = []
-for _ in range(TEST_EXAMPLES):
+for _ in range(params.TEST_EXAMPLES):
     test.append(scenes.select().render(cache, dev))
 test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device=dev)
 
 min_loss = None
 while(True):
-    if not (n//STEPS_PER_BATCH) % BATCHES_PER_PARAMETER_RELOAD:
-        from params import *
+    if not (n//params.STEPS_PER_BATCH) % params.BATCHES_PER_PARAMETER_RELOAD:
+        importlib.reload(params)
         for g in opt.param_groups:
-            g['lr'] = LEARNING_RATE
-            g['momentum'] = MOMENTUM
-            g['weight_decay'] = WEIGHT_DECAY
+            g['lr'] = params.LEARNING_RATE
+            g['momentum'] = params.MOMENTUM
+            g['weight_decay'] = params.WEIGHT_DECAY
         log_params(n)
 
     train = []
-    for _ in range(EXAMPLES_PER_MIX*MIXES_PER_BATCH):
+    for _ in range(params.EXAMPLES_PER_MIX*params.MIXES_PER_BATCH):
         train.append(scenes.select().render(cache, dev))
-    train = [merge_examples(train[i::MIXES_PER_BATCH]) for i in range(MIXES_PER_BATCH)]
+    train = [merge_examples(train[i::params.MIXES_PER_BATCH]) for i in range(params.MIXES_PER_BATCH)]
     train_tensor = torch.tensor(numpy.array([x.filtered_image for x in train]), device=dev)
 
     c.train(mode=True)
-    for step in range(STEPS_PER_BATCH):
+    for step in range(params.STEPS_PER_BATCH):
         opt.zero_grad()
         log.add_scalar('loss/training', l := loss(c(train_tensor), train, dev), n)
         if step == 0: log.add_scalar('loss/training/batch start', l, n)
-        if step == STEPS_PER_BATCH-1: log.add_scalar('loss/training/batch end', l, n)
+        if step == params.STEPS_PER_BATCH-1: log.add_scalar('loss/training/batch end', l, n)
         l.backward()
         opt.step()
         n += 1
@@ -1302,10 +1303,10 @@ while(True):
         if min_loss is None: min_loss = test_loss
         elif test_loss < min_loss:
             min_loss = test_loss
-            torch.save({'model': c, 'training step': n}, MODEL_PATH)
+            torch.save({'model': c, 'training step': n}, params.MODEL_PATH)
             log.add_scalar('loss/test/min', test_loss, n)
 
-        if not (n//STEPS_PER_BATCH) % BATCHES_PER_RECONSTRUCTION:
+        if not (n//params.STEPS_PER_BATCH) % params.BATCHES_PER_RECONSTRUCTION:
             classifications = classifications.to('cpu')
             _, indices = torch.sort(ls)
             clean_h, clean_w, _ = test[0].clean_image.shape
