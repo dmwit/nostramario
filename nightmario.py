@@ -1269,7 +1269,7 @@ test_tensor = torch.tensor(numpy.array([x.filtered_image for x in test]), device
 
 min_loss = None
 while(True):
-    if not (n//params.STEPS_PER_BATCH) % params.BATCHES_PER_PARAMETER_RELOAD:
+    if n % params.STEPS_PER_PARAMETER_RELOAD < params.STEPS_PER_BATCH:
         importlib.reload(params)
         for g in opt.param_groups:
             g['lr'] = params.LEARNING_RATE
@@ -1306,7 +1306,10 @@ while(True):
             torch.save({'model': c, 'training step': n}, params.MODEL_PATH)
             log.add_scalar('loss/test/min', test_loss, n)
 
-        if not (n//params.STEPS_PER_BATCH) % params.BATCHES_PER_RECONSTRUCTION:
+        if params.STEPS_PER_SAVE > 0 and n % params.STEPS_PER_SAVE < params.STEPS_PER_BATCH:
+            torch.save({'model': c, 'training step': n}, params.MODEL_PATH)
+
+        if n % params.STEPS_PER_RECONSTRUCTION < params.STEPS_PER_BATCH:
             classifications = classifications.to('cpu')
             _, indices = torch.sort(ls)
             clean_h, clean_w, _ = test[0].clean_image.shape
