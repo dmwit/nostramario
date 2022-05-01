@@ -139,7 +139,7 @@ class ImageDirectoryLayer:
     directories: Categorical[str]
 
     def __post_init__(self):
-        self.directories.map(lambda d: PHOTOS_DIR if d == '$' else d)
+        self.directories.map(lambda d: params.PHOTOS_DIR if d == '$' else d)
 
     def parameter_count(self): return 0
     def onehot_ranges(self, offset): return []
@@ -1075,8 +1075,17 @@ def filter_linear_gradient(image):
 
     return numpy.around(mask*image0 + (1-mask)*image1).astype(numpy.uint8)
 
-PHOTOS_DIR = "/slow/dmwit/imagenet/ILSVRC/Data/CLS-LOC/train"
-def load_random_photo(directory = PHOTOS_DIR):
+# You might wonder why this pattern happens here:
+#     def foo(bar = None):
+#         if bar is None: bar = params.baz
+# Instead of this one:
+#     def foo(bar = params.baz):
+# In the former, params.baz is re-evaluated on each function call, while in the
+# latter, params.baz is evaluated just once, when the function is first
+# defined. I'm not 100% on that). Since we're dynamically reloading the params
+# module, we want to re-evaluate.
+def load_random_photo(directory = None):
+    if directory is None: directory = params.PHOTOS_DIR
     while True:
         _, directories, files = walk(directory).__next__()
         if directories and files: raise Exception(f'Error when loading a random image: directory {directory} has both files and directories.')
