@@ -31,7 +31,7 @@
 	# let's say a typical speedrun is 15 minutes 0-9, 30 minutes 10-19, 3
 	# minutes 20; but then bump up the probabilities for 20-24 a bit because
 	# sometimes folks like to do 20 HIs
-	216, 144 1p-k0.png (5); 1p-k1.png (15); 1p-k2.png (2)
+	216, 144 1p-k0.png (5); 1p-k1.png (10); 1p-k2.png (2)
 	224, 144 1p-k0.png (30); 1p-k1.png (32); 1p-k2.png (32); 1p-k3.png (32); 1p-k4.png (33); 1p-k5.png (20); 1p-k6.png (20); 1p-k7.png (20); 1p-k8.png (20); 1p-k9.png (20)
 
 	# virus count
@@ -112,14 +112,15 @@
 	56 , 44 0 1p lookahead
 	184, 44 0 2p lookahead
 
-select (10):
+select (2):
 	level-select.png
 
 	40, 48 select-virus-level.png (20); select-speed.png (2); select-music-type.png
 
-	87, 77 1p-select-00.png; 1p-select-01.png; 1p-select-02.png; 1p-select-03.png; 1p-select-04.png; 1p-select-05.png; 1p-select-06.png; 1p-select-07.png; 1p-select-08.png; 1p-select-09.png; 1p-select-10.png; 1p-select-11.png; 1p-select-12.png; 1p-select-13.png; 1p-select-14.png (20); 1p-select-15.png; 1p-select-16.png; 1p-select-17.png; 1p-select-18.png; 1p-select-19.png; 1p-select-20.png
-	184, 72 w0.png; w1.png (20); w2.png
-	192, 72 w0.png; w1.png; w2.png; w3.png; w4.png (20); w5.png; w6.png; w7.png; w8.png; w9.png
+	# peaks at 00 for the start of a run, 10 for the end of a 0-10 run, 14 for 2p mode, 06/08/11/13 for speedrun monthlies, 20 for the end of a 0-20 run
+	87, 77 1p-select-00.png (20); 1p-select-01.png; 1p-select-02.png; 1p-select-03.png; 1p-select-04.png; 1p-select-05.png; 1p-select-06.png (5); 1p-select-07.png; 1p-select-08.png (5); 1p-select-09.png; 1p-select-10.png (2); 1p-select-11.png (5); 1p-select-12.png; 1p-select-13.png (5); 1p-select-14.png (20); 1p-select-15.png; 1p-select-16.png; 1p-select-17.png; 1p-select-18.png; 1p-select-19.png; 1p-select-20.png (5)
+	184, 72 w0.png (4); w1.png (4); w2.png
+	192, 72 w0.png (20); w1.png; w2.png; w3.png (5); w4.png (20); w5.png; w6.png (5); w7.png (5); w8.png (5); w9.png
 
 	89, 129 1p-select-low.png; 1p-select-med.png (80); 1p-select-hi.png (20)
 
@@ -152,9 +153,9 @@ select (10):
 		64 , 88 !w2.png
 		72 , 88 !wp.png
 		176, 88 !2p-level-frame.png
-		87 , 91 2p-select-00.png; 2p-select-01.png; 2p-select-02.png; 2p-select-03.png; 2p-select-04.png; 2p-select-05.png; 2p-select-06.png; 2p-select-07.png; 2p-select-08.png; 2p-select-09.png; 2p-select-10.png; 2p-select-11.png; 2p-select-12.png; 2p-select-13.png; 2p-select-14.png (20); 2p-select-15.png; 2p-select-16.png; 2p-select-17.png; 2p-select-18.png; 2p-select-19.png; 2p-select-20.png
-		184, 96 w0.png; w1.png (20); w2.png
-		192, 96 w0.png; w1.png; w2.png; w3.png; w4.png (20); w5.png; w6.png; w7.png; w8.png; w9.png
+		87 , 91 2p-select-00.png (5); 2p-select-01.png; 2p-select-02.png; 2p-select-03.png; 2p-select-04.png; 2p-select-05.png; 2p-select-06.png; 2p-select-07.png; 2p-select-08.png; 2p-select-09.png; 2p-select-10.png; 2p-select-11.png; 2p-select-12.png; 2p-select-13.png; 2p-select-14.png (20); 2p-select-15.png; 2p-select-16.png; 2p-select-17.png; 2p-select-18.png; 2p-select-19.png; 2p-select-20.png
+		184, 96 w0.png (5); w1.png (20); w2.png
+		192, 96 w0.png (5); w1.png; w2.png; w3.png; w4.png (20); w5.png; w6.png; w7.png; w8.png; w9.png
 
 		# speed selection
 		64, 140 !w2.png
