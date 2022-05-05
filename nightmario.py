@@ -1105,8 +1105,8 @@ SCALING_METHODS = [cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INT
 def noisy_scale(image):
     fx = random.normalvariate(3, 0.1)
     fy = random.normalvariate(3, 0.1)
-    dx = round(random.normalvariate(0, 4))*fx*8 + random.normalvariate(0, 2) + (fx-3)*image.shape[1]/2
-    dy = round(random.normalvariate(0, 4))*fy*8 + random.normalvariate(0, 2) + (fy-3)*image.shape[0]/2
+    dx = random.normalvariate(0, 1) + (fx-3)*image.shape[1]/2
+    dy = random.normalvariate(0, 1) + (fy-3)*image.shape[0]/2
 
     if not random.randrange(100):
         background = numpy.ones((image.shape[0]*3, image.shape[1]*3, 3), dtype=numpy.uint8) \
