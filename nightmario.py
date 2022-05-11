@@ -1231,7 +1231,6 @@ def losses(tensor, golden, device):
         ls[i] = xe_loss_single(tensor[i, example.onehot_indices], example.classification[example.onehot_indices])
         for r in example.onehot_ranges:
             ls[i] += xe_loss_single(tensor[i, r], example.classification[r])
-        ls[i] /= len(example.onehot_ranges)+1
     return ls
 
 def loss(tensor, golden, device):
