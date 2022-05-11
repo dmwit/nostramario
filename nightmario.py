@@ -1099,6 +1099,7 @@ def load_random_photo(directory = None):
 def load_exact_photo(filename):
     background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
     if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
+    if background.shape[2] == 4: background = background[:, :, 0:3]
     return background
 
 SCALING_METHODS = [cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_LANCZOS4]
