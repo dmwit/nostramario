@@ -165,5 +165,4 @@ select (2):
 		80,  32 !w2.png
 other (1):
 	empty-background.png
-	# TODO: capture more of the %5 cutscenes and put them in other-screens
 	0, 0 directories other-screens; $
