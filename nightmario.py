@@ -734,8 +734,9 @@ class SceneSelection:
 
     def render(self, cache):
         image = numpy.array(cache.load(self.background).image)
-        for layer in self.layers: layer.render(cache, image)
+        # do layers after the playfield so the win/loss layers can occlude the playfield
         for playfield in self.playfields: playfield.render(cache, image)
+        for layer in self.layers: layer.render(cache, image)
         for lookahead in self.lookaheads.values(): lookahead.render(cache, image)
         for magnifier in self.magnifiers: magnifier.render(cache, image)
         return image
