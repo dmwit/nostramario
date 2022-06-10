@@ -123,12 +123,22 @@ select (2):
 
 	40, 48 select-virus-level.png (20); select-speed.png (2); select-music-type.png
 
-	# peaks at 00 for the start of a run, 10 for the end of a 0-10 run, 14 for 2p mode, 06/08/11/13 for speedrun monthlies, 20 for the end of a 0-20 run
-	87, 77 1p-select-00.png (20); 1p-select-01.png; 1p-select-02.png; 1p-select-03.png; 1p-select-04.png; 1p-select-05.png; 1p-select-06.png (5); 1p-select-07.png; 1p-select-08.png (5); 1p-select-09.png; 1p-select-10.png (2); 1p-select-11.png (5); 1p-select-12.png; 1p-select-13.png (5); 1p-select-14.png (20); 1p-select-15.png; 1p-select-16.png; 1p-select-17.png; 1p-select-18.png; 1p-select-19.png; 1p-select-20.png (5)
+	# There used to be some peaks:
+	#     * 00          x20 for the start of a run
+	#     * 10          x 2 for the end of a 0-10 run
+	#     * 20          x 5 for the end of a 0-20 run
+	#     * 14          x20 for 2p mode
+	#     * 06/08/11/13 x 5 for speedrun monthlies
+	# (and corresponding biases in the digit representation)
+	# But this makes the classifier so eager to answer with 00 and 14 that it
+	# screws up literally any other choice.
+	87, 77 1p-select-00.png; 1p-select-01.png; 1p-select-02.png; 1p-select-03.png; 1p-select-04.png; 1p-select-05.png; 1p-select-06.png; 1p-select-07.png; 1p-select-08.png; 1p-select-09.png; 1p-select-10.png; 1p-select-11.png; 1p-select-12.png; 1p-select-13.png; 1p-select-14.png; 1p-select-15.png; 1p-select-16.png; 1p-select-17.png; 1p-select-18.png; 1p-select-19.png; 1p-select-20.png
 	184, 72 w0.png (4); w1.png (4); w2.png
-	192, 72 w0.png (20); w1.png; w2.png; w3.png (5); w4.png (20); w5.png; w6.png (5); w7.png (5); w8.png (5); w9.png
+	192, 72 w0.png (3); w1.png (2); w2.png (2); w3.png (2); w4.png (2); w5.png (2); w6.png (2); w7.png (2); w8.png (2); w9.png (2)
 
-	89, 129 1p-select-low.png; 1p-select-med.png (80); 1p-select-hi.png (20)
+	# used to really de-emphasize 1p-select-low, but it basically makes the
+	# classifier screw up in those rare cases where low is selected every time
+	89, 129 1p-select-low.png; 1p-select-med.png (3); 1p-select-hi.png (2)
 
 	59, 179 select-fever.png; select-chill.png; select-off.png
 
@@ -159,14 +169,17 @@ select (2):
 		64 , 88 !w2.png
 		72 , 88 !wp.png
 		176, 88 !2p-level-frame.png
-		87 , 91 2p-select-00.png (5); 2p-select-01.png; 2p-select-02.png; 2p-select-03.png; 2p-select-04.png; 2p-select-05.png; 2p-select-06.png; 2p-select-07.png; 2p-select-08.png; 2p-select-09.png; 2p-select-10.png; 2p-select-11.png; 2p-select-12.png; 2p-select-13.png; 2p-select-14.png (20); 2p-select-15.png; 2p-select-16.png; 2p-select-17.png; 2p-select-18.png; 2p-select-19.png; 2p-select-20.png
-		184, 96 w0.png (5); w1.png (20); w2.png
-		192, 96 w0.png (5); w1.png; w2.png; w3.png; w4.png (20); w5.png; w6.png; w7.png; w8.png; w9.png
+		# There used to be peaks at 00 (x5) and 14 (x20) (and corresponding
+		# biases in the digit representation), but it too strongly encourages
+		# the classifier to pick 14.
+		87 , 91 2p-select-00.png; 2p-select-01.png; 2p-select-02.png; 2p-select-03.png; 2p-select-04.png; 2p-select-05.png; 2p-select-06.png; 2p-select-07.png; 2p-select-08.png; 2p-select-09.png; 2p-select-10.png; 2p-select-11.png; 2p-select-12.png; 2p-select-13.png; 2p-select-14.png; 2p-select-15.png; 2p-select-16.png; 2p-select-17.png; 2p-select-18.png; 2p-select-19.png; 2p-select-20.png
+		184, 96 w0.png (4); w1.png (4); w2.png
+		192, 96 w0.png (3); w1.png (2); w2.png (2); w3.png (2); w4.png (2); w5.png (2); w6.png (2); w7.png (2); w8.png (2); w9.png (2)
 
 		# speed selection
 		64, 140 !w2.png
 		72, 140 !wp.png
-		89, 144 2p-select-low.png; 2p-select-med.png (80); 2p-select-hi.png (20)
+		89, 144 2p-select-low.png; 2p-select-med.png (3); 2p-select-hi.png (2)
 
 		80,  32 !w2.png
 other (1):
