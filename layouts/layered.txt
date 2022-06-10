@@ -69,7 +69,7 @@
 	96, 72 !1p-game-on.png (5000); 1p-loss-blank-01.png; 1p-loss-blank-02.png; 1p-loss-blank-03.png; 1p-loss-blank-04.png; 1p-loss-blank-05.png; 1p-loss-blank-06.png; 1p-loss-blank-07.png; 1p-loss-blank-08.png; 1p-loss-blank-09.png; 1p-loss-blank-10.png; 1p-loss-blank-11.png; 1p-loss-blank-12.png; 1p-loss-blank-13.png; 1p-loss-blank-14.png; 1p-loss-blank-15.png; 1p-loss-blank-16.png; 1p-loss-start-01.png; 1p-loss-start-02.png; 1p-loss-start-03.png; 1p-loss-start-04.png; 1p-loss-start-05.png; 1p-loss-start-06.png; 1p-loss-start-07.png; 1p-loss-start-08.png; 1p-loss-start-09.png; 1p-loss-start-10.png; 1p-loss-start-11.png; 1p-loss-start-12.png; 1p-loss-start-13.png; 1p-loss-start-14.png; 1p-loss-start-15.png; 1p-loss-start-16.png; 1p-win-blank-01.png; 1p-win-blank-02.png; 1p-win-blank-03.png; 1p-win-blank-04.png; 1p-win-blank-05.png; 1p-win-blank-06.png; 1p-win-blank-07.png; 1p-win-blank-08.png; 1p-win-blank-09.png; 1p-win-blank-10.png; 1p-win-blank-11.png; 1p-win-blank-12.png; 1p-win-blank-13.png; 1p-win-blank-14.png; 1p-win-blank-15.png; 1p-win-blank-16.png; 1p-win-start-01.png; 1p-win-start-02.png; 1p-win-start-03.png; 1p-win-start-04.png; 1p-win-start-05.png; 1p-win-start-06.png; 1p-win-start-07.png; 1p-win-start-08.png; 1p-win-start-09.png; 1p-win-start-10.png; 1p-win-start-11.png; 1p-win-start-12.png; 1p-win-start-13.png; 1p-win-start-14.png; 1p-win-start-15.png; 1p-win-start-16.png
 
 	44, 159 magnifier
-	184, 56 !doc-rest.png (16); doc-throw.png (5); doc-hold.png (80)
+	184, 56 !doc-rest.png (16); doc-throw.png (5); doc-hold.png (80); doc-shrug.png
 
 2p (60):
 	# 2p speed
