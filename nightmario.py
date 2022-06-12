@@ -1102,6 +1102,9 @@ def load_random_photo(directory = None):
 
 def load_exact_photo(filename):
     background = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
+    # I saw a crash on accessing background.shape once. If it happens again,
+    # this print() will help work out why.
+    if background is None: print(filename)
     if len(background.shape) == 2: background = numpy.repeat(background[:, :, numpy.newaxis], 3, axis=2)
     if background.shape[2] == 4: background = background[:, :, 0:3]
     return background
