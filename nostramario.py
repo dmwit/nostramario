@@ -7,6 +7,8 @@ import Xlib.display
 import Xlib.ext.composite
 import Xlib.X
 
+from nostramario import *
+
 def find_fceux(dpy=None):
     if dpy is None: dpy = Xlib.display.Display()
 
@@ -38,76 +40,34 @@ def screenshot_window(win):
     img = pixmap.get_image(x, y, w, h, Xlib.X.ZPixmap, 0xffffffff).data
     return numpy.frombuffer(img, dtype=numpy.uint8).reshape(h, w, 4)[:, :, :3]
 
-def indicate_match(img, match, tl, br):
-    tlx, tly = tl
-    brx, bry = br
-    color = {'b': (255, 0, 0), 'r': (0, 0, 255), 'y': (0, 255, 255), 'k': (0, 0, 0)}[match[0]]
-    lines = {
-        'x1': [((0, 0), (1, 1)), ((0, 1), (1, 0))],
-        'x2': [((0.2, 0.2), (0.8, 0.8)), ((0.2, 0.8), (0.8, 0.2))],
-        'l': [((1, 1), (0, 0.5)), ((0, 0.5), (1, 0))],
-        'r': [((0, 1), (1, 0.5)), ((1, 0.5), (0, 0))],
-        '*': [((0, 0.5), (0.5, 0)), ((0, 0.5), (0.5, 1)), ((1, 0.5), (0.5, 0)), ((1, 0.5), (0.5, 1))],
-        '^': [((0, 1), (0.5, 0)), ((0.5, 0), (1, 1))],
-        'v': [((0, 0), (0.5, 1)), ((0.5, 1), (1, 0))],
-        }.get(match[1:], [])
-    text = match[1] if '0' <= match[1] and match[1] <= '9' else ''
-
-    def lerp(x, y): return (tlx + round((0.6*x+0.2)*(brx-tlx-1)), tly + round((0.6*y+0.2)*(bry-tly-1)))
-
-    for pt1, pt2 in lines:
-        img = cv2.line(img, lerp(*pt1), lerp(*pt2), (255, 255, 255), 3)
-    for pt1, pt2 in lines:
-        img = cv2.line(img, lerp(*pt1), lerp(*pt2), color, 2)
-    img = cv2.putText(img, text, lerp(0, 1), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 3)
-    img = cv2.putText(img, text, lerp(0, 1), cv2.FONT_HERSHEY_PLAIN, 1, color, 2)
-
-    return img
-
 if __name__ == "__main__":
-    fceux = find_fceux()
+    #fceux = find_fceux()
     #vidcap = cv2.VideoCapture('input.mp4')
 
-    colors = "bry"
-    shapes = ["x1", "x2"] + [c for c in "lr*v^"]
-    digits = ['k' + str(d) for d in [' '] + list(range(10))]
-    templates = nostramario.load_templates(
-        (nm, nm + ".png")
-        for nm in
-            digits +
-            [color + shape for color in colors for shape in shapes]
-        )
+    with open(DEFAULT_SCENE_TREE_LOCATION) as f:
+        _, _, t = parse_scene_tree(f)
+    scenes = Scenes(t)
+    classifier = torch.load(params.MODEL_PATH)['model']
+    classifier.cpu()
+    classifier.train(mode=False) # I think it starts this way but let's be defensive
+    cache = TemplateCache()
 
-    millis = 1
+    millis = -1
     #millis = math.floor(1000/vidcap.get(cv2.CAP_PROP_FPS))
     k = cv2.waitKey(millis)
     # q to quit
     i = 0
     while k != 113:
-        img = screenshot_window(fceux)
+        img = load_random_photo('captures')
+        #img = screenshot_window(fceux)
         #img = cv2.imread('input.png')
         #success, img = vidcap.read()
         #if not success: break
 
-        processed = numpy.array(img)
+        processed = scenes.reconstruct(classifier(torch.tensor(numpy.array([img])))[0]).render(cache)
 
         i += 1
-        try:
-            g = nostramario.learn_grid_from_img(img)
-        except: k = cv2.waitKey(millis)
-        else:
-            templates.set_grid(g)
-            print(templates.match(img).shape)
-            cv2.imshow('original', img)
-            cv2.imshow('processed', processed)
-            print(i)
-#            for x, y in g.range(img):
-#                if templates.match(img, g, x, y).shape != (32,):
-#                    print(x, y, templates.match(img, g, x, y).shape)
-#                #processed = indicate_match(processed, match, g.ipoint(x, y), g.ipoint(x+1, y+1))
-#                k = cv2.waitKey(0)
-#                if k == 113: break
-#            else:
-#                #cv2.imwrite('output.png', processed)
-#                cv2.imshow('processed', processed)
-            if k != 113: k = cv2.waitKey(millis)
+        cv2.imshow('original', img)
+        cv2.imshow('processed', processed)
+        print(i)
+        k = cv2.waitKey(millis)
