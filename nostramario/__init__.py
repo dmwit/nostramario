@@ -267,6 +267,7 @@ class ImageLayer:
     pos: Position
     learn: bool
     images: Categorical[str]
+    obscuring_patterns: Dict[str, Tuple[int, List[str]]]
 
     def parameter_count(self):
         return len(self.images.values) if self.learn else 0
@@ -276,8 +277,9 @@ class ImageLayer:
 
     def select(self, offset, params):
         i, image = self.images.select_with_index()
+        obscure = self.obscuring_patterns.get(image, (0, []))
         if self.learn: params[offset+i] = 1
-        return ImageLayerSelection(self.pos, image)
+        return (obscure, ImageLayerSelection(self.pos, image))
 
     def reconstruct(self, offset, params):
         return \
@@ -305,7 +307,7 @@ class ImageDirectoryLayer:
     def onehot_ranges(self, offset): return []
 
     def select(self, offset, params):
-        return ImageDirectoryLayerSelection(self.pos, load_random_photo(self.directories.select()))
+        return ((0, []), ImageDirectoryLayerSelection(self.pos, load_random_photo(self.directories.select())))
 
     def reconstruct(self, offset, params):
         directories = self.directories.values
@@ -761,6 +763,10 @@ class PlayfieldSelection:
     h: int
     cells: Dict[Position, Cell]
     frame_parity: int
+    # obscured_rows: Set[int]
+
+    def __post_init__(self):
+        object.__setattr__(self, 'obscured_rows', set())
 
     def render(self, cache, image):
         for cell_pos in self.positions():
@@ -775,9 +781,13 @@ class PlayfieldSelection:
             ]
 
     def positions(self):
+        ys = [y for y in range(-1, self.h) if y not in self.obscured_rows]
         for x in range(self.w):
-            for y in range(-1, self.h):
+            for y in ys:
                 yield Position(x, y)
+
+    def obscure(self, max_row):
+        self.obscured_rows.update(range(self.h-max_row, self.h))
 
 @dataclass
 class Lookahead:
@@ -861,9 +871,18 @@ class Scene:
     def select(self, params):
         params[self.index] = 1
         frame_parity = random.randrange(2)
-        return SceneSelection(self.name, self.background,
-            [layer.select(offset, params) for offset, layer in self.layers],
-            [(nm, playfield.select(offset, params, frame_parity)) for nm, (offset, playfield) in self.playfields],
+        playfields = [(nm, playfield.select(offset, params, frame_parity)) for nm, (offset, playfield) in self.playfields]
+
+        layers = []
+        for offset, layer in self.layers:
+            (rows, names), selection = layer.select(offset, params)
+            layers.append(selection)
+            if names:
+                for nm, playfield in playfields:
+                    if nm in names:
+                        playfield.obscure(rows)
+
+        return SceneSelection(self.name, self.background, layers, playfields,
             {nm: lookahead.select(offset, params, frame_parity) for nm, (offset, lookahead) in self.lookaheads.items()},
             [magnifier.select(offset, params) for offset, magnifier in self.magnifiers],
             )
@@ -1061,6 +1080,7 @@ NAME_REGEX = re.compile('([^\r\n]+?)([ \t]*\(([1-9][0-9]*)\))?[ \t]*:')
 LOCATED_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*,[ \t]*(0|[1-9][0-9]*)[ \t]*(.+)')
 PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*playfield')
 LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead([ \t]*\(([1-9][0-9]*)\))?')
+OBSCURING_REGEX = re.compile('(!)?[ \t]*([^!]+)[ \t]*![ \t]*([^!]*)')
 def parse_scene_tree(line_source, parent_indent=None):
     t = SceneTree(None, [], [], [], {}, [])
     self_indent = None
@@ -1099,10 +1119,15 @@ def parse_scene_tree(line_source, parent_indent=None):
                     t.magnifiers.append(Magnifier(pos))
                 elif thing.startswith('directories'):
                     t.layers.append(ImageDirectoryLayer(pos, parse_categorical(thing[11:])))
+                elif match := OBSCURING_REGEX.fullmatch(thing):
+                    learn = not match.group(1)
+                    images = parse_categorical(match.group(2))
+                    obscured = parse_obscuring_patterns(match.group(3), images.values)
+                    t.layers.append(ImageLayer(pos, learn, images, obscured))
                 else:
                     learn = thing[0] != '!'
                     if not learn: thing = thing[1:]
-                    t.layers.append(ImageLayer(pos, learn, parse_categorical(thing)))
+                    t.layers.append(ImageLayer(pos, learn, parse_categorical(thing), {}))
                 break
             elif t.background == None:
                 t.background = content
@@ -1130,6 +1155,25 @@ SPACE_REGEX = re.compile('([ \t]*)(.*[^ \t\r\n])?[ \t\r\n]*')
 def split_indentation(line):
     match = SPACE_REGEX.fullmatch(line)
     return (match.group(1), match.group(2) or '')
+
+PATTERN_TO_REGEX = {'*': '.*', '$': '([0-9]*)', '.': '\\.'}
+def parse_obscuring_patterns(s, images):
+    obscured_rows = {}
+
+    for spec in s.split(';'):
+        mapping = spec.split(':')
+        if len(mapping) != 2: raise Exception(f'Expected exactly one : in obscuring pattern spec; saw {spec} instead')
+        if len(mapping[0].split('$')) != 2: raise Exception(f'Expected exactly one row-matching pattern $ in obscuring pattern spec; saw {mapping[0]} instead')
+        pattern = re.compile(''.join(PATTERN_TO_REGEX.get(c, c) for c in mapping[0].strip()))
+        targets = [nm.strip() for nm in mapping[1].split(',')]
+
+        for image in images:
+            if match := pattern.fullmatch(image):
+                # TODO: say which patterns matched, maybe
+                if image in obscured_rows: raise Exception(f'More than one obscuring pattern matched image {image}')
+                obscured_rows[image] = (int(match.group(1)), targets)
+
+    return obscured_rows
 
 # You might wonder why this pattern happens here:
 #     def foo(bar = None):
