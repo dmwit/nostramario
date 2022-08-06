@@ -852,7 +852,7 @@ class Scene:
     index: int
     background: str
     layers: List[Tuple[int, Union[ImageLayer, ImageDirectoryLayer]]]
-    playfields: List[Tuple[int, Playfield]]
+    playfields: List[Tuple[str, Tuple[int, Playfield]]]
     lookaheads: Dict[str, Tuple[int, Lookahead]]
     magnifiers: List[Tuple[int, Magnifier]]
     parameter_count: int
@@ -863,7 +863,7 @@ class Scene:
         frame_parity = random.randrange(2)
         return SceneSelection(self.name, self.background,
             [layer.select(offset, params) for offset, layer in self.layers],
-            [playfield.select(offset, params, frame_parity) for offset, playfield in self.playfields],
+            [(nm, playfield.select(offset, params, frame_parity)) for nm, (offset, playfield) in self.playfields],
             {nm: lookahead.select(offset, params, frame_parity) for nm, (offset, lookahead) in self.lookaheads.items()},
             [magnifier.select(offset, params) for offset, magnifier in self.magnifiers],
             )
@@ -875,7 +875,7 @@ class Scene:
 
         slices = []
         for offset, layer in self.layers: slices += layer.onehot_ranges(offset)
-        for playfield, (offset, _) in zip(selection.playfields, self.playfields):
+        for (_, playfield), (_, (offset, _)) in zip(selection.playfields, self.playfields):
             slices += playfield.onehot_ranges(offset)
         for offset, lookahead in self.lookaheads.values(): slices += lookahead.onehot_ranges(offset)
         for offset, magnifier in self.magnifiers: slices += magnifier.onehot_ranges(offset)
@@ -887,15 +887,17 @@ class SceneSelection:
     name: List[str]
     background: str
     layers: List[Union[ImageLayerSelection, ImageDirectoryLayerSelection]]
-    playfields: List[PlayfieldSelection]
+    playfields: List[Tuple[str, PlayfieldSelection]]
     lookaheads: Dict[str, LookaheadSelection]
     magnifiers: List[MagnifierSelection]
 
     def render(self, cache):
         image = numpy.array(cache.load(self.background).image)
         # do layers after the playfield so the win/loss layers can occlude the playfield
-        for playfield in self.playfields: playfield.render(cache, image)
+        for _, playfield in self.playfields: playfield.render(cache, image)
         for layer in self.layers: layer.render(cache, image)
+        # TODO: perhaps we should (think about and) specify the order this
+        # happens in a bit more carefully...
         for lookahead in self.lookaheads.values(): lookahead.render(cache, image)
         for magnifier in self.magnifiers: magnifier.render(cache, image)
         return image
@@ -906,7 +908,7 @@ class SceneTree:
     background: Optional[str]
     children: List[Tuple[str, int, 'SceneTree']]
     layers: List[Union[ImageLayer, ImageDirectoryLayer]]
-    playfields: List[Playfield]
+    playfields: List[Tuple[str, Playfield]]
     lookaheads: Dict[str, Lookahead]
     magnifiers: List[Magnifier]
     _scene_parameters: Optional[List[int]] = None
@@ -924,14 +926,14 @@ class SceneTree:
         for layer in self.layers:
             layers.append((index[0], layer))
             index[0] += layer.parameter_count()
-        for playfield in self.playfields:
-            playfields.append((index[0], playfield))
+        for k, playfield in self.playfields:
+            playfields.append((k, (index[0], playfield)))
             index[0] += playfield.parameter_count()
         for magnifier in self.magnifiers:
             magnifiers.append((index[0], magnifier))
             index[0] += magnifier.parameter_count()
 
-        # backing out the lookahead changes is too annoying, just do COW instead
+        # backing out the dictionary changes is too annoying, just do COW instead
         if self.lookaheads: lookaheads = dict(lookaheads)
         for k, la in self.lookaheads.items():
             if k in lookaheads:
@@ -949,6 +951,8 @@ class SceneTree:
 
         if not self.children:
             if bg is None: raise Exception(f"No background specified for {nm}.")
+            if len(set(pid for pid, _ in self.playfields)) != len(self.playfields):
+                raise Exception(f"Duplicate playfield name.") # TODO: say which name in the error
             yield (weight, Scene(list(nm), index[0], bg, list(layers), list(playfields), lookaheads, list(magnifiers), parameter_count, scene_parameters))
             index[0] += 1
 
@@ -962,7 +966,7 @@ class SceneTree:
             self._parameter_count = (0
                 + (0 if self.children else 1)
                 + sum(layer.parameter_count() for layer in self.layers)
-                + sum(playfield.parameter_count() for playfield in self.playfields)
+                + sum(playfield.parameter_count() for _, playfield in self.playfields)
                 + sum(lookahead.parameter_count() for lookahead in self.lookaheads.values())
                 + sum(child.parameter_count() for _, _, child in self.children)
                 )
@@ -976,7 +980,7 @@ class SceneTree:
 
     def _initialize_scene_parameters(self, indices, index):
         index += sum(layer.parameter_count() for layer in self.layers)
-        index += sum(playfield.parameter_count() for playfield in self.playfields)
+        index += sum(playfield.parameter_count() for _, playfield in self.playfields)
         index += sum(lookahead.parameter_count() for lookahead in self.lookaheads.values())
 
         for _, _, child in self.children:
@@ -1010,7 +1014,7 @@ class Scenes:
         scene = reconstruct_list(params[self.indices], 0, self.dist.values)
         return SceneSelection(scene.name, scene.background,
             [layer.reconstruct(i, params) for i, layer in scene.layers],
-            [playfield.reconstruct(i, params) for i, playfield in scene.playfields],
+            [(nm, playfield.reconstruct(i, params)) for nm, (i, playfield) in scene.playfields],
             {nm: lookahead.reconstruct(i, params) for nm, (i, lookahead) in scene.lookaheads.items()},
             [magnifier.reconstruct(i, params) for i, magnifier in scene.magnifiers],
             )
@@ -1055,7 +1059,7 @@ def slice_size(start, length): return slice(start, start+length)
 
 NAME_REGEX = re.compile('([^\r\n]+?)([ \t]*\(([1-9][0-9]*)\))?[ \t]*:')
 LOCATED_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*,[ \t]*(0|[1-9][0-9]*)[ \t]*(.+)')
-PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*playfield')
+PLAYFIELD_REGEX = re.compile('([1-9][0-9]*)[ \t]*x[ \t]*([1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*playfield')
 LOOKAHEAD_REGEX = re.compile('(0|[1-9][0-9]*)[ \t]*([^ \t\r\n]|[^ \t\r\n][^ \r\n]*[^ \t\r\n])[ \t]*lookahead([ \t]*\(([1-9][0-9]*)\))?')
 def parse_scene_tree(line_source, parent_indent=None):
     t = SceneTree(None, [], [], [], {}, [])
@@ -1087,7 +1091,7 @@ def parse_scene_tree(line_source, parent_indent=None):
                 pos = Position(int(match.group(1)), int(match.group(2)))
                 thing = match.group(3)
                 if match := PLAYFIELD_REGEX.fullmatch(thing):
-                    t.playfields.append(Playfield(pos, int(match.group(1)), int(match.group(2))))
+                    t.playfields.append((match.group(3), Playfield(pos, int(match.group(1)), int(match.group(2)))))
                 elif match := LOOKAHEAD_REGEX.fullmatch(thing):
                     la = t.lookaheads.setdefault(match.group(2), Lookahead())
                     la += Lookahead(int(match.group(1)), pos, weight_from_group(match.group(4)))

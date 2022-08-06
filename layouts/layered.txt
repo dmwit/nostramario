@@ -38,7 +38,7 @@
 	216, 192 1p-k0.png (9); 1p-k1.png (8); 1p-k2.png (7); 1p-k3.png (6); 1p-k4.png (5); 1p-k5.png (4); 1p-k6.png (3); 1p-k7.png (2); 1p-k8.png
 	224, 192 1p-k0.png; 1p-k1.png; 1p-k2.png; 1p-k3.png; 1p-k4.png; 1p-k5.png; 1p-k6.png; 1p-k7.png; 1p-k8.png; 1p-k9.png
 
-	96, 72 8x16 playfield
+	96, 72 8x16 1p playfield
 	# I don't know how many frames a typical pill takes to place + await drop
 	# time and the like; probably placement is 40-60 frames, so start there and
 	# add a little
@@ -108,8 +108,8 @@
 	131, 184 2p-k0.png (20); 2p-k1.png (20); 2p-k2.png (20); 2p-k3.png (20); 2p-k4.png (20); 2p-k5.png (20); 2p-k6.png (2); 2p-k7.png; 2p-k8.png
 	139, 184 2p-k0.png; 2p-k1.png; 2p-k2.png; 2p-k3.png; 2p-k4.png; 2p-k5.png; 2p-k6.png; 2p-k7.png; 2p-k8.png; 2p-k9.png
 
-	32 , 72 8x16 playfield
-	160, 72 8x16 playfield
+	32 , 72 8x16 1p playfield
+	160, 72 8x16 2p playfield
 	56 , 44 0 1p lookahead
 	184, 44 0 2p lookahead
 
@@ -182,6 +182,7 @@ select (2):
 		89, 144 2p-select-low.png; 2p-select-med.png (3); 2p-select-hi.png (2)
 
 		80,  32 !w2.png
+
 other (1):
 	empty-background.png
 	0, 0 directories other-screens; $
