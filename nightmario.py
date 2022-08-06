@@ -135,16 +135,18 @@ while(True):
             clean_h, clean_w, _ = test[0].clean_image.shape
             filtered_h, filtered_w, _ = test[0].filtered_image.shape
             h = clean_h + filtered_h
-            w = max(2*clean_w, filtered_w)
+            w = max(3*clean_w, filtered_w)
 
             reconstructions = numpy.zeros((15, h, w, 3), dtype=numpy.uint8)
             for i in [0, 1, 2, 3, 4, -5, -4, -3, -2, -1]:
                 reconstructions[i, :clean_h, :clean_w, :] = test[indices[i]].clean_image
                 reconstructions[i, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[i]]).render(cache)
+                reconstructions[i, :clean_h, 2*clean_w:3*clean_w, :] = scenes.reconstruct(test[indices[i]].classification).render(cache) ^ reconstructions[i, :clean_h, clean_w:2*clean_w, :]
                 reconstructions[i, clean_h:, :filtered_w, :] = test[indices[i]].filtered_image
             for i, j in enumerate(random.sample(list(range(5, indices.shape[0]-5)), 5)):
                 reconstructions[i+5, :clean_h, :clean_w, :] = test[indices[j]].clean_image
                 reconstructions[i+5, :clean_h, clean_w:2*clean_w, :] = scenes.reconstruct(classifications[indices[j]]).render(cache)
+                reconstructions[i+5, :clean_h, 2*clean_w:3*clean_w, :] = scenes.reconstruct(test[indices[j]].classification).render(cache) ^ reconstructions[i+5, :clean_h, clean_w:2*clean_w, :]
                 reconstructions[i+5, clean_h:, :filtered_w, :] = test[indices[j]].filtered_image
             # OpenCV uses BGR by default, tensorboardX uses RGB by default
             reconstructions = numpy.flip(reconstructions, 3)
