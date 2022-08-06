@@ -601,8 +601,8 @@ class Playfield:
         # if stuff isn't falling, maybe put a floating pill (that's being
         # player-controlled) or mark some clears on-screen
         if not falling:
-            # 1/2/6 clears/nothing/pill
-            extras = random.randrange(9)
+            # 1/1/3 clears/nothing/pill
+            extras = random.randrange(5)
             if extras < 1: # mark some clears
                 pos = self.random_position()
                 max_lengths = {
@@ -633,10 +633,10 @@ class Playfield:
                     direction = random.choice(list(max_lengths))
                     boundary = mark_random_clear(cells, pos, direction, min(6, max_lengths[direction]))
 
-            elif extras < 3: # don't put anything extra
+            elif extras < 2: # don't put anything extra
                 pass
 
-            elif extras < 9: # put a floating pill
+            elif extras < 5: # put a floating pill
                 voids = ([]
                     + [ (pos, Position.UP)
                         for x in range(self.w)
