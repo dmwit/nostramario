@@ -840,7 +840,7 @@ class LookaheadSelection:
 
     def cells(self):
         if self.colors:
-            tl_color = self.rotation&2 >> 1
+            tl_color = (self.rotation&2) >> 1
             dpos, tl_shape, other_shape = [
                 (Position(8, 0), Cell.LEFT, Cell.RIGHT),
                 (Position(0, 8), Cell.UP, Cell.DOWN),
