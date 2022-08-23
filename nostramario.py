@@ -85,8 +85,8 @@ class NotVideoWriter:
         # the -vf pad thing is from
         # https://stackoverflow.com/q/20847674/791604
         subprocess.run(['ffmpeg', '-framerate', str(self.fps),  '-i', self.__filename('%d'), '-c:v', 'libx264', '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', self.target])
-        # for i in range(self.n):
-        #     os.remove(self.__filename(i))
+        for i in range(self.n):
+            os.remove(self.__filename(i))
         self.n = 0
 
     def __del__(self):
