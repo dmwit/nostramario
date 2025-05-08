@@ -72,30 +72,32 @@ def draw_grid(img, grid):
         if cx >= 0: cv2.line(img, (cx, 0), (cx, ih-1), color)
         c += 1
 
+def draw_outline(img, tmpl, pos):
+    y, x = pos
+    h, w, _ = tmpl.shape
+    x -= w//2
+    y -= h//2
+    color = (0, 255, 0)
+    cv2.line(img, (x, y), (x+w, y), color)
+    cv2.line(img, (x+w, y), (x+w, y+h), color)
+    cv2.line(img, (x+w, y+h), (x, y+h), color)
+    cv2.line(img, (x, y+h), (x, y), color)
+    cv2.line(img, (x+w//2, y), (x+w//2, y+h), color)
+    cv2.line(img, (x, y+h//2), (x+w, y+h//2), color)
+
 def open_template(filename):
     # PIL and cv2 disagree on color order
-    template = np.int32(Image.open(filename))[:, :, [2,1,0,3]]
+    template = np.uint8(Image.open(filename))[:, :, [2,1,0,3]]
     template[:, :, 3] = np.fmin(template[:, :, 3], 1)
     return template
 
-def score_position(template, img, x, y):
-    img_x_lo = max(x, 0)
-    img_y_lo = max(y, 0)
-    img_x_hi = min(x + template.shape[0], img.shape[0])
-    img_y_hi = min(y + template.shape[1], img.shape[1])
-    if img_x_lo >= img.shape[0] or img_y_lo >= img.shape[1] or img_x_hi < 0 or img_y_hi < 0:
-        print("WARNING: trying to score a template position that doesn't overlap the image")
-        return float('inf')
-    img = img[img_x_lo:img_x_hi, img_y_lo:img_y_hi, :]
-    template = template[img_x_lo-x : img_x_hi-x, img_y_lo-y : img_y_hi-y, :]
-    return np.sum(np.abs(img - template[:, :, :3])*template[:, :, 3:], None)/np.sum(template[:, :, 3], None)
-
-def score_positions(template, img):
-    result = np.zeros((img.shape[0], img.shape[1]))
-    for center_x in range(img.shape[0]):
-        for center_y in range(img.shape[1]):
-            result[center_x, center_y] = score_position(template, img, center_x - template.shape[0]//2, center_y - template.shape[1]//2)
-    return 1-result/(256*3)
+def score_positions(img, template):
+    pad0 = template.shape[0]//2
+    pad1 = template.shape[1]//2
+    padded = np.pad(img, ((pad0, pad0), (pad1, pad1), (0, 0)))
+    mask = template[:, :, 3]
+    template = template[:, :, :3]
+    return cv2.matchTemplate(padded, template, cv2.TM_SQDIFF, mask=mask)
 
 def resize_template(template, grid_size):
     return cv2.resize(template, (math.floor(grid_size[1]/8*template.shape[1]), math.floor(grid_size[0]/8*template.shape[0])), interpolation=cv2.INTER_NEAREST)
@@ -124,15 +126,17 @@ while True:
     if not success: break
     grid = detect_grid(frame)
     tmpl = resize_template(template, grid[0])
-    scores = score_positions(tmpl, frame)
-    draw_grid(frame, grid)
+    scores = score_positions(frame, tmpl)
+    pos = np.unravel_index(np.argmin(scores), scores.shape)
+    #draw_grid(frame, grid)
+    draw_outline(frame, tmpl, pos)
 
     if video_out is None:
         video_height += tmpl.shape[0] + scores.shape[0] + tmpl.shape[0]//10
         video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
 
     # add a black+white line at the bottom to help notice templates that are bigger than the slack space allows for
-    frame_components = [frame, tmpl[:, :, :3], np.floor(255.99*scores[:, :, np.newaxis]), np.zeros((1, video_width, 3)), 255*np.ones((1, video_width, 3))]
+    frame_components = [frame, tmpl[:, :, :3], np.zeros((1, video_width, 3)), 255*np.ones((1, video_width, 3))]
     frame_height = sum(arr.shape[0] for arr in frame_components)
     if frame_height < video_height:
         frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
