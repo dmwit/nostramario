@@ -131,13 +131,14 @@ while True:
     #draw_grid(frame, grid)
     draw_outline(frame, tmpl, pos)
 
+    # add a white line at the bottom to help notice templates that are bigger than the slack space allows for
+    frame_components = [frame, tmpl[:, :, :3], 255*np.ones((1, video_width, 3))]
+    frame_height = sum(arr.shape[0] for arr in frame_components)
+
     if video_out is None:
-        video_height += tmpl.shape[0] + scores.shape[0] + tmpl.shape[0]//10
+        video_height = frame_height + tmpl.shape[0]//10
         video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
 
-    # add a black+white line at the bottom to help notice templates that are bigger than the slack space allows for
-    frame_components = [frame, tmpl[:, :, :3], np.zeros((1, video_width, 3)), 255*np.ones((1, video_width, 3))]
-    frame_height = sum(arr.shape[0] for arr in frame_components)
     if frame_height < video_height:
         frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
     frame = np.uint8(vstack(frame_components))
