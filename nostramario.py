@@ -117,7 +117,6 @@ filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
 video_in = cv2.VideoCapture(filename)
 video_fps = video_in.get(cv2.CAP_PROP_FPS)
 video_width = int(video_in.get(cv2.CAP_PROP_FRAME_WIDTH))
-video_height = int(video_in.get(cv2.CAP_PROP_FRAME_HEIGHT))
 video_out = None
 frame_number = 0
 start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
@@ -129,6 +128,7 @@ while True:
     scores = score_positions(frame, tmpl)
     pos = np.unravel_index(np.argmin(scores), scores.shape)
     #draw_grid(frame, grid)
+    cv2.putText(frame, str(frame_number), (10, 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255))
     draw_outline(frame, tmpl, pos)
 
     # add a white line at the bottom to help notice templates that are bigger than the slack space allows for
@@ -142,8 +142,8 @@ while True:
     if frame_height < video_height:
         frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
     frame = np.uint8(vstack(frame_components))
-    if frame.shape[0] > video_height:
-        frame = frame[:video_height, :, :]
+    if frame.shape[0] > video_height or frame.shape[1] > video_width:
+        frame = frame[:video_height, :video_width, :]
 
     video_out.write(frame)
     end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
