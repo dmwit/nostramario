@@ -4,6 +4,8 @@ from skimage import color
 import cv2
 import math
 import numpy as np
+import pathlib
+import skimage
 import sys
 import time
 
@@ -55,41 +57,26 @@ def detect_grid(img):
     offset = np.array([rphase/math.pi-dphase, cphase/math.pi-dphase]) * size
     return (size, offset)
 
-def draw_grid(img, grid):
-    size, offset = grid
-    h, w = size
-    y, x = offset
-    ih, iw, _ = img.shape
-    color = (0, 255, 0)
-
-    r = 0
-    while (ry := math.floor(y + r*h*2)) < ih:
-        if ry >= 0: cv2.line(img, (0, ry), (iw-1, ry), color)
-        r += 1
-
-    c = 0
-    while (cx := math.floor(x + c*w*2)) < iw:
-        if cx >= 0: cv2.line(img, (cx, 0), (cx, ih-1), color)
-        c += 1
-
-def draw_outline(img, tmpl, pos):
-    y, x = pos
-    h, w, _ = tmpl.shape
-    x -= w//2
-    y -= h//2
-    color = (0, 255, 0)
-    cv2.line(img, (x, y), (x+w, y), color)
-    cv2.line(img, (x+w, y), (x+w, y+h), color)
-    cv2.line(img, (x+w, y+h), (x, y+h), color)
-    cv2.line(img, (x, y+h), (x, y), color)
-    cv2.line(img, (x+w//2, y), (x+w//2, y+h), color)
-    cv2.line(img, (x, y+h//2), (x+w, y+h//2), color)
-
 def open_template(filename):
     # PIL and cv2 disagree on color order
     template = np.uint8(Image.open(filename))[:, :, [2,1,0,3]]
     template[:, :, 3] = np.fmin(template[:, :, 3], 1)
     return template
+
+SPRITE_SIZE=8
+ZOOM=3
+ZOOMED_SPRITE_SIZE=ZOOM*SPRITE_SIZE
+
+def open_sprites(directory):
+    sprite_dict = {file: np.uint8(Image.open(file).convert())[:, :, [2,1,0]] for file in pathlib.Path(directory).iterdir()}
+    sprite_arr = np.zeros((1,1,len(sprite_dict),ZOOMED_SPRITE_SIZE,ZOOMED_SPRITE_SIZE,3), np.int32)
+    sprite_names = []
+    i = 0
+    for name, arr in sprite_dict.items():
+        sprite_names.append(name.with_suffix("").name)
+        sprite_arr[0, 0, i, :, :, :] = np.repeat(np.repeat(arr, ZOOM, 0), ZOOM, 1)
+        i += 1
+    return sprite_names, sprite_arr
 
 def score_positions(img, template):
     pad0 = template.shape[0]//2
@@ -111,43 +98,124 @@ def vstack(arrs):
         return np.pad(arr, dshape)
     return np.concatenate([zero_pad(arr) for arr in arrs])
 
+# Normal slicing:
+#     * Inclusive lower bound + exclusive upper bound
+#     * Negative bounds are treated as offsets from the end of the array
+#     * Out of bounds accesses are errors
+# Slicing in this function:
+#     * Inclusive lower bound + size
+#     * Negative bounds are treated as out of bounds before the beginning of the array
+#     * Out of bounds accesses read zeros
+def pad_slice(arr, slices):
+    # TODO: for efficiency, slice first, pad after
+    assert(arr.ndim == len(slices))
+    padding = []
+    shifted_slices = []
+    for i in range(len(slices)):
+        arr_sz = arr.shape[i]
+        lo, slice_sz = slices[i]
+        pad_lo = max(0, -lo)
+        pad_hi = max(0, lo+slice_sz-arr_sz)
+        padding.append((pad_lo, pad_hi))
+        shifted_slices.append(slice(lo+pad_lo,lo+pad_lo+slice_sz))
+    #print("shape:", arr.shape, "; slices:", slices, "; computed padding:", padding, "; shifted slices:", shifted_slices)
+    return np.pad(arr, padding)[*shifted_slices]
+
+def id_transform(arr): return arr
+def lab_transform(arr): return skimage.color.rgb2lab(np.flip(np.uint8(arr), -1))
+def ab_transform(arr): return lab_transform(arr)[..., 1:3]
+def phase_magnitude_transform(arr):
+    fft = np.fft.fft2(arr, axes=(-3,-2))
+    return np.concatenate([np.angle(fft), np.abs(fft)], -1)
+def real_imaginary_transform(arr):
+    fft = np.fft.fft2(arr, axes=(-3,-2))
+    return np.concatenate([np.real(fft), np.imag(fft)], -1)
+def phase_transform(arr): return np.angle(np.fft.fft2(arr, axes=(-3,-2)))
+def magnitude_transform(arr): return np.abs(np.fft.fft2(arr, axes=(-3,-2)))
+def safe_log_transform(arr): return np.log(np.fmax(arr, 1e-10))
+def compose_transform(t1, t2): return lambda arr: t1(t2(arr))
+all_transforms = [
+    (id_transform, "id"),
+    (lab_transform, "lab"),
+    (ab_transform, "ab"),
+    #(phase_magnitude_transform, "phase+magnitude"),
+    #(real_imaginary_transform, "real+imaginary"),
+    #(phase_transform, "phase"),
+    #(magnitude_transform, "magnitude"),
+    #(compose_transform(safe_log_transform, magnitude_transform), "log.magnitude"),
+    #(compose_transform(phase_magnitude_transform, lab_transform), "phase+magnitude.lab"),
+    #(compose_transform(real_imaginary_transform, lab_transform), "real+imaginary.lab"),
+    #(compose_transform(phase_transform, lab_transform), "phase.lab"),
+    #(compose_transform(magnitude_transform, lab_transform), "magnitude.lab"),
+    #(compose_transform(compose_transform(safe_log_transform, magnitude_transform), lab_transform), "log.magnitude.lab"),
+    ]
+
 template = open_template("1p-hi-masked.png")
+sprite_names, sprite_arr = open_sprites("sprites")
 
 filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
 video_in = cv2.VideoCapture(filename)
 video_fps = video_in.get(cv2.CAP_PROP_FPS)
-video_width = int(video_in.get(cv2.CAP_PROP_FRAME_WIDTH))
 video_out = None
+success, frame = video_in.read()
+grid = detect_grid(frame)
+tmpl = resize_template(template, grid[0])
+scores = score_positions(frame, tmpl)
+
+y, x = np.unravel_index(np.argmin(scores), scores.shape)
+h, w, _ = tmpl.shape
+x -= w//2
+y -= h//2
+
 frame_number = 0
 start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-while True:
-    success, frame = video_in.read()
-    if not success: break
-    grid = detect_grid(frame)
-    tmpl = resize_template(template, grid[0])
-    scores = score_positions(frame, tmpl)
-    pos = np.unravel_index(np.argmin(scores), scores.shape)
-    #draw_grid(frame, grid)
-    cv2.putText(frame, str(frame_number), (10, 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255))
-    draw_outline(frame, tmpl, pos)
+while success:
+    screen = cv2.resize(pad_slice(frame, ((y,h), (x,w), (0,3))), (ZOOM*template.shape[1], ZOOM*template.shape[0]), interpolation=cv2.INTER_CUBIC)
+    board = screen[9*ZOOMED_SPRITE_SIZE:25*ZOOMED_SPRITE_SIZE,12*ZOOMED_SPRITE_SIZE:20*ZOOMED_SPRITE_SIZE,:]
+    tiles = np.lib.stride_tricks.sliding_window_view(board, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE, 3))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, ...]
+    #diff = tiles-sprite_arr
+    #detected_sprite_indices = np.argmin(np.sum(diff*diff, (3,4,5)), 2)
+    #reconstruction = sprite_arr[0,0,detected_sprite_indices,...]
+    frame_components = [screen]
 
-    # add a white line at the bottom to help notice templates that are bigger than the slack space allows for
-    frame_components = [frame, tmpl[:, :, :3], 255*np.ones((1, video_width, 3))]
+    frame_components.append(np.concatenate(sprite_arr[0,0,...], 1))
+    for transform, transform_name in all_transforms:
+        diff = transform(tiles)-transform(sprite_arr)
+        diffsq = diff*diff
+        diffmag = np.sum(diffsq, -1)
+        detected_sprite_indices = np.argmin(np.sum(diffsq, (3,4,5)), 2)
+        mismatch_rgb = np.repeat(np.uint8(255.99*diffmag/np.max(diffmag, None))[:, :, :, :, :, np.newaxis], 3, -1)
+        for r in range(16):
+            for c in range(8):
+                if np.sum(np.abs(tiles[r,c,...]), None) < 10000: continue
+                frame_components.append(np.concatenate(
+                    ( np.concatenate(mismatch_rgb[r,c,...], 1)
+                    , tiles[r,c,0,...]
+                    , sprite_arr[0,0,detected_sprite_indices[r,c],...]
+                    ), 1))
+        frame_components.append(np.zeros((8,1,3)))
+
     frame_height = sum(arr.shape[0] for arr in frame_components)
+    frame_width = max(arr.shape[1] for arr in frame_components)
 
     if video_out is None:
-        video_height = frame_height + tmpl.shape[0]//10
+        video_height = frame_height + frame_height//5
+        video_width = frame_width
         video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
 
     if frame_height < video_height:
+        print("WARNING: small frame", frame_number, "(expected height", video_height, ", but saw", frame_height, ")")
         frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
     frame = np.uint8(vstack(frame_components))
     if frame.shape[0] > video_height or frame.shape[1] > video_width:
+        print("WARNING: large frame", frame_number, "(expected ", video_width, "x", video_height, ", but saw", frame.shape[1], "x", frame.shape[0], ")")
         frame = frame[:video_height, :video_width, :]
 
     video_out.write(frame)
     end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-    print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
+    #print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
+
+    success, frame = video_in.read()
     frame_number += 1
 print("")
 if video_out is not None: video_out.release()
