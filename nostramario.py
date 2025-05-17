@@ -137,7 +137,7 @@ def compose_transform(t1, t2): return lambda arr: t1(t2(arr))
 all_transforms = [
     (id_transform, "id"),
     (lab_transform, "lab"),
-    (ab_transform, "ab"),
+    #(ab_transform, "ab"),
     #(phase_magnitude_transform, "phase+magnitude"),
     #(real_imaginary_transform, "real+imaginary"),
     #(phase_transform, "phase"),
