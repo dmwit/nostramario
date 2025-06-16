@@ -150,8 +150,49 @@ all_transforms = [
     #(compose_transform(compose_transform(safe_log_transform, magnitude_transform), lab_transform), "log.magnitude.lab"),
     ]
 
+# This works in BGR space. I also experimented with working in LAB space, but
+# this is a bit faster and the results are only marginally different.
+class Posterizer:
+    def __init__(self, bgr):
+        if bgr.shape[-1] != 3:
+            raise ValueError("Expected a 3-channel array (perhaps you accidentally sent an image with transparency?)")
+        bgr = np.reshape(bgr, (-1, 3))
+        bgrs = set()
+        minl = float('inf')
+        for i in range(bgr.shape[0]):
+            cur_bgr = tuple(bgr[i, :])
+            l = sum(cur_bgr)
+            if l > 0 and cur_bgr not in bgrs:
+                bgrs.add(cur_bgr)
+                minl = min(minl, l)
+        self._lthreshold = minl / 2
+        # Since we're deciding "black or not" based on _lthreshold, we only
+        # compare against the non-black colors in bgr2indexed. But we still
+        # want a version that has the zeros for use in bgr2bgr. So we keep
+        # around two arrays, one with black and one without.
+        #
+        # Since we're going to be squaring differences in bgr2indexed, we use
+        # int32 to allow negative differences and large squares.
+        self._bgrs = np.array(list(bgrs), dtype=np.int32)
+        self._zbgrs = np.array([(0, 0, 0)] + list(bgrs), dtype=np.uint8)
+
+    def bgr2indexed(self, bgr):
+        return np.where(np.sum(bgr, -1) <= self._lthreshold, 0, 1 + np.argmin(np.sum(np.square(np.expand_dims(bgr, -2) - self._bgrs), -1), -1))
+
+    def bgr2bgr(self, bgr):
+        return self._zbgrs[self.bgr2indexed(bgr), :]
+
+# probably too smart for its own good
+def from_grayscale(arr):
+    if np.all(0 <= arr) and np.all(arr <= 1):
+        arr = 255.99*arr
+    if arr.dtype in [np.float16, np.float32, np.float64, np.float128]:
+        arr = np.uint8(arr)
+    return np.repeat(arr[..., np.newaxis], 3, -1)
+
 template = open_template("1p-hi-masked.png")
 sprite_names, sprite_arr = open_sprites("sprites")
+posterizer = Posterizer(sprite_arr)
 
 filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
 video_in = cv2.VideoCapture(filename)
@@ -172,34 +213,14 @@ start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 while success:
     screen = cv2.resize(pad_slice(frame, ((y,h), (x,w), (0,3))), (ZOOM*template.shape[1], ZOOM*template.shape[0]), interpolation=cv2.INTER_CUBIC)
     board = screen[9*ZOOMED_SPRITE_SIZE:25*ZOOMED_SPRITE_SIZE,12*ZOOMED_SPRITE_SIZE:20*ZOOMED_SPRITE_SIZE,:]
-    tiles = np.lib.stride_tricks.sliding_window_view(board, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE, 3))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, ...]
-    #diff = tiles-sprite_arr
-    #detected_sprite_indices = np.argmin(np.sum(diff*diff, (3,4,5)), 2)
-    #reconstruction = sprite_arr[0,0,detected_sprite_indices,...]
-    frame_components = [screen]
-
-    frame_components.append(np.concatenate(sprite_arr[0,0,...], 1))
-    for transform, transform_name in all_transforms:
-        diff = transform(tiles)-transform(sprite_arr)
-        diffsq = diff*diff
-        diffmag = np.sum(diffsq, -1)
-        detected_sprite_indices = np.argmin(np.sum(diffsq, (3,4,5)), 2)
-        mismatch_rgb = np.repeat(np.uint8(255.99*diffmag/np.max(diffmag, None))[:, :, :, :, :, np.newaxis], 3, -1)
-        for r in range(16):
-            for c in range(8):
-                if np.sum(np.abs(tiles[r,c,...]), None) < 10000: continue
-                frame_components.append(np.concatenate(
-                    ( np.concatenate(mismatch_rgb[r,c,...], 1)
-                    , tiles[r,c,0,...]
-                    , sprite_arr[0,0,detected_sprite_indices[r,c],...]
-                    ), 1))
-        frame_components.append(np.zeros((8,1,3)))
+    #tiles = np.lib.stride_tricks.sliding_window_view(board, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE, 3))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, ...]
+    frame_components = [screen, posterizer.bgr2bgr(screen)]
 
     frame_height = sum(arr.shape[0] for arr in frame_components)
     frame_width = max(arr.shape[1] for arr in frame_components)
 
     if video_out is None:
-        video_height = frame_height + frame_height//5
+        video_height = frame_height
         video_width = frame_width
         video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
 
@@ -213,7 +234,7 @@ while success:
 
     video_out.write(frame)
     end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-    #print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
+    print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
 
     success, frame = video_in.read()
     frame_number += 1
