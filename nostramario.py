@@ -66,6 +66,7 @@ def open_template(filename):
 SPRITE_SIZE=8
 ZOOM=3
 ZOOMED_SPRITE_SIZE=ZOOM*SPRITE_SIZE
+OCCUPATION_THRESHOLD=50
 
 def open_sprites(directory):
     sprite_dict = {file: np.uint8(Image.open(file).convert())[:, :, [2,1,0]] for file in pathlib.Path(directory).iterdir()}
@@ -179,8 +180,8 @@ class Posterizer:
     def bgr2indexed(self, bgr):
         return np.where(np.sum(bgr, -1) <= self._lthreshold, 0, 1 + np.argmin(np.sum(np.square(np.expand_dims(bgr, -2) - self._bgrs), -1), -1))
 
-    def bgr2bgr(self, bgr):
-        return self._zbgrs[self.bgr2indexed(bgr), :]
+    def indexed2bgr(self, indexes): return self._zbgrs[indexes, :]
+    def bgr2bgr(self, bgr): return self.indexed2bgr(self.bgr2indexed(bgr))
 
 # probably too smart for its own good
 def from_grayscale(arr):
@@ -189,6 +190,12 @@ def from_grayscale(arr):
     if arr.dtype in [np.float16, np.float32, np.float64, np.float128]:
         arr = np.uint8(arr)
     return np.repeat(arr[..., np.newaxis], 3, -1)
+
+def add_to_key(d, k, v):
+    try:
+        d[k].add(v)
+    except KeyError:
+        d[k] = set([v])
 
 template = open_template("1p-hi-masked.png")
 sprite_names, sprite_arr = open_sprites("sprites")
@@ -210,11 +217,21 @@ y -= h//2
 
 frame_number = 0
 start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+
 while success:
     screen = cv2.resize(pad_slice(frame, ((y,h), (x,w), (0,3))), (ZOOM*template.shape[1], ZOOM*template.shape[0]), interpolation=cv2.INTER_CUBIC)
     board = screen[9*ZOOMED_SPRITE_SIZE:25*ZOOMED_SPRITE_SIZE,12*ZOOMED_SPRITE_SIZE:20*ZOOMED_SPRITE_SIZE,:]
-    #tiles = np.lib.stride_tricks.sliding_window_view(board, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE, 3))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, ...]
-    frame_components = [screen, posterizer.bgr2bgr(screen)]
+    poster_index = posterizer.bgr2indexed(board)
+    tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, ...]
+    tile_colors = np.zeros((16*ZOOMED_SPRITE_SIZE, 8*ZOOMED_SPRITE_SIZE), dtype=np.uint8)
+    for r in range(tiles.shape[0]):
+        for c in range(tiles.shape[1]):
+            counts = np.bincount(tiles[r, c, :, :].flatten())
+            if counts.shape[0] > 1:
+                index = 1+np.argmax(counts[1:])
+                if counts[index] > OCCUPATION_THRESHOLD:
+                    tile_colors[r*ZOOMED_SPRITE_SIZE:(r+1)*ZOOMED_SPRITE_SIZE, c*ZOOMED_SPRITE_SIZE:(c+1)*ZOOMED_SPRITE_SIZE] = index
+    frame_components = [screen, posterizer.indexed2bgr(poster_index), posterizer.indexed2bgr(tile_colors)]
 
     frame_height = sum(arr.shape[0] for arr in frame_components)
     frame_width = max(arr.shape[1] for arr in frame_components)
