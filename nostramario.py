@@ -197,9 +197,36 @@ def add_to_key(d, k, v):
     except KeyError:
         d[k] = set([v])
 
+# arr.shape = (num_sprites, sprite_height, sprite_width)
+# arr.dtype = uint8
+# returns an array with shape (palette_size, num_sprites, sprite_height, sprite_width)
+# where palette_size = max(arr)+1
+def distance_field(arr):
+    n, h, w = arr.shape
+    p = 1+np.max(arr)
+
+    a, b = 1 + np.indices((h, w))
+    palette_missing = np.fmin(a, b)
+    palette_missing = np.fmin(palette_missing, np.flip(palette_missing, 0))
+    palette_missing = np.fmin(palette_missing, np.flip(palette_missing, 1))
+
+    stamp = np.sqrt(np.sum(np.square(np.indices((2*h-1, 2*w-1)) - [[[h-1]], [[w-1]]]), 0))
+
+    overscan = np.zeros((p, n, 3*h-2, 3*w-2))
+    overscan[:, :, h-1:2*h-1, w-1:2*w-1] = palette_missing
+
+    for sprite in range(n):
+        for r in range(h):
+            for c in range(w):
+                color = arr[sprite, r, c]
+                overscan[color, sprite, r:r+2*h-1, c:c+2*w-1] = np.fmin(overscan[color, sprite, r:r+2*h-1, c:c+2*w-1], stamp)
+
+    return overscan[:, :, h-1:2*h-1, w-1:2*w-1]
+
 template = open_template("1p-hi-masked.png")
 sprite_names, sprite_arr = open_sprites("sprites")
 posterizer = Posterizer(sprite_arr)
+sprite_distances = distance_field(posterizer.bgr2indexed(sprite_arr[0, 0]))
 
 filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
 video_in = cv2.VideoCapture(filename)
@@ -222,16 +249,23 @@ while success:
     screen = cv2.resize(pad_slice(frame, ((y,h), (x,w), (0,3))), (ZOOM*template.shape[1], ZOOM*template.shape[0]), interpolation=cv2.INTER_CUBIC)
     board = screen[9*ZOOMED_SPRITE_SIZE:25*ZOOMED_SPRITE_SIZE,12*ZOOMED_SPRITE_SIZE:20*ZOOMED_SPRITE_SIZE,:]
     poster_index = posterizer.bgr2indexed(board)
-    tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, ...]
-    tile_colors = np.zeros((16*ZOOMED_SPRITE_SIZE, 8*ZOOMED_SPRITE_SIZE), dtype=np.uint8)
-    for r in range(tiles.shape[0]):
-        for c in range(tiles.shape[1]):
-            counts = np.bincount(tiles[r, c, :, :].flatten())
-            if counts.shape[0] > 1:
-                index = 1+np.argmax(counts[1:])
-                if counts[index] > OCCUPATION_THRESHOLD:
-                    tile_colors[r*ZOOMED_SPRITE_SIZE:(r+1)*ZOOMED_SPRITE_SIZE, c*ZOOMED_SPRITE_SIZE:(c+1)*ZOOMED_SPRITE_SIZE] = index
-    frame_components = [screen, posterizer.indexed2bgr(poster_index), posterizer.indexed2bgr(tile_colors)]
+    tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
+    distances = np.choose(tiles, sprite_distances)
+    frame_components = [screen]
+    empty_components = []
+    white_component = 255*np.ones((1,screen.shape[1],3))
+    for r in range(distances.shape[0]):
+        for c in range(distances.shape[1]):
+            sprite_scores = np.argsort(np.sum(distances[r, c], (1, 2)))
+            sprite_component = np.concatenate(sprite_arr[0, 0, sprite_scores], 1)
+            orig_tile_component = board[r*ZOOMED_SPRITE_SIZE:(r+1)*ZOOMED_SPRITE_SIZE, c*ZOOMED_SPRITE_SIZE:(c+1)*ZOOMED_SPRITE_SIZE]
+            posterized_tile_component = posterizer.indexed2bgr(tiles[r, c, 0])
+            new_components = [np.concatenate([orig_tile_component, posterized_tile_component, sprite_component], 1), white_component]
+            if sprite_names[sprite_scores[0]] == 'k ':
+                empty_components += new_components
+            else:
+                frame_components += new_components
+    frame_components += empty_components
 
     frame_height = sum(arr.shape[0] for arr in frame_components)
     frame_width = max(arr.shape[1] for arr in frame_components)
