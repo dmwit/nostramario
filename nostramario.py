@@ -250,22 +250,10 @@ while success:
     board = screen[9*ZOOMED_SPRITE_SIZE:25*ZOOMED_SPRITE_SIZE,12*ZOOMED_SPRITE_SIZE:20*ZOOMED_SPRITE_SIZE,:]
     poster_index = posterizer.bgr2indexed(board)
     tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
-    distances = np.choose(tiles, sprite_distances)
-    frame_components = [screen]
-    empty_components = []
-    white_component = 255*np.ones((1,screen.shape[1],3))
-    for r in range(distances.shape[0]):
-        for c in range(distances.shape[1]):
-            sprite_scores = np.argsort(np.sum(distances[r, c], (1, 2)))
-            sprite_component = np.concatenate(sprite_arr[0, 0, sprite_scores], 1)
-            orig_tile_component = board[r*ZOOMED_SPRITE_SIZE:(r+1)*ZOOMED_SPRITE_SIZE, c*ZOOMED_SPRITE_SIZE:(c+1)*ZOOMED_SPRITE_SIZE]
-            posterized_tile_component = posterizer.indexed2bgr(tiles[r, c, 0])
-            new_components = [np.concatenate([orig_tile_component, posterized_tile_component, sprite_component], 1), white_component]
-            if sprite_names[sprite_scores[0]] == 'k ':
-                empty_components += new_components
-            else:
-                frame_components += new_components
-    frame_components += empty_components
+    sprites = np.argmin(np.sum(np.choose(tiles, sprite_distances), (3,4)), 2)
+    frame_components = [board]
+    for row in sprites:
+        frame_components.append(np.concatenate(sprite_arr[0, 0, row], 1))
 
     frame_height = sum(arr.shape[0] for arr in frame_components)
     frame_width = max(arr.shape[1] for arr in frame_components)
