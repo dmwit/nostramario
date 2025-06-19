@@ -92,7 +92,7 @@ def resize_template(template, grid_size):
 
 def vstack(arrs):
     if not arrs: return np.zeros((0,))
-    shape = tuple(map(max, *[arr.shape for arr in arrs]))
+    shape = tuple(map(max, zip(*[arr.shape for arr in arrs])))
     def zero_pad(arr):
         dshape = list(map(lambda big, small: (0, big-small), shape, arr.shape))
         dshape[0] = (0, 0)
