@@ -30,7 +30,21 @@ def quad_max(xs, ys):
     a0, a1, a2 = alpha(y0, x0, x1, x2), alpha(y1, x1, x0, x2), alpha(y2, x2, x0, x1)
     return (x0*a1+x0*a2+x1*a0+x1*a2+x2*a0+x2*a1)/2/(a0+a1+a2)
 
-def detect_grid(img):
+class Estimate:
+    def __init__(self, lo, best, hi):
+        self.lo = lo
+        self.best = best
+        self.hi = hi
+
+    def lrange(self, n):
+        for i in range(n):
+            frac = i/(n-1)
+            yield self.lo*frac + self.hi*(1 - frac)
+
+def division_estimate(num, denom, ddenom):
+    return Estimate(num/(denom+ddenom), num/denom, num/(denom-ddenom))
+
+def estimate_grid_size(img):
     rgb = np.uint32(img)
     brightness = np.sqrt((rgb*rgb).sum(2,dtype=np.uint32))
     fft_brightness = np.fft.fft2(brightness)
@@ -43,19 +57,25 @@ def detect_grid(img):
     # assume we aren't zoomed way into some small part of the 256x224 NES output, so we should ignore very low-frequency signals
     folded[:rs//224+1,:] = -float('inf')
     folded[:,:cs//256+1] = -float('inf')
-    rmax, cmax = np.divmod(np.argmax(folded), folded.shape[-1])
-    rmax += 1
-    cmax += 1
-    rsize = quad_max([rs/(2*r) for r in range(rmax-1,rmax+2)], log_clip(mags[rmax-1:rmax+2,cmax]))
-    csize = quad_max([cs/(2*c) for c in range(cmax-1,cmax+2)], log_clip(mags[rmax,cmax-1:cmax+2]))
-    rmax_interp = rs/(2*rsize)
-    cmax_interp = cs/(2*csize)
-    rphase = arr_circle_lerp(angles[:,0], rmax_interp)
-    cphase = arr_circle_lerp(angles[0,:], cmax_interp)
-    size = np.array([rsize,csize])
-    dphase = 0.5
-    offset = np.array([rphase/math.pi-dphase, cphase/math.pi-dphase]) * size
-    return (size, offset)
+    rmax, cmax = np.unravel_index(np.argmax(folded), folded.shape)
+    return (division_estimate(rs/2, rmax+1, 1), division_estimate(cs/2, cmax+1, 1))
+
+def grid_search(f, xlo, xhi, ylo, yhi, resolution=2):
+    scores = np.zeros((resolution, resolution))
+    while True:
+        for i in range(resolution):
+            for j in range(resolution):
+                x = lerp(xlo, xhi, (i+0.5)/resolution)
+                y = lerp(ylo, yhi, (j+0.5)/resolution)
+                scores[i, j] = f(x, y)
+
+        best_i, best_j = np.unravel_index(np.argmin(scores), scores.shape)
+        if np.all(scores == scores[best_i, best_j]): break
+
+        xlo, xhi = lerp(xlo, xhi, best_i/resolution), lerp(xlo, xhi, (best_i+1)/resolution)
+        ylo, yhi = lerp(ylo, yhi, best_j/resolution), lerp(ylo, yhi, (best_j+1)/resolution)
+
+    return (lerp(xlo, xhi, 0.5), lerp(ylo, yhi, 0.5))
 
 def open_template(filename):
     # PIL and cv2 disagree on color order
@@ -151,6 +171,161 @@ all_transforms = [
     #(compose_transform(compose_transform(safe_log_transform, magnitude_transform), lab_transform), "log.magnitude.lab"),
     ]
 
+class Position:
+    def __init__(self, r, c):
+        self.r = r
+        self.c = c
+
+    def __add__(self, vec): return Position(self.r + vec.dr, self.c + vec.dc)
+    __radd__ = __add__
+
+    def __sub__(self, pos):
+        try:
+            return Vector(self.r - pos.r, self.c - pos.c)
+        except AttributeError:
+            return NotImplemented
+
+    def snap(self): return Position(math.floor(self.r), math.floor(self.c))
+
+    def __repr__(self): return f"Position({self.r.__repr__()}, {self.c.__repr__()})"
+    def __str__(self): return f"({self.r.__str__()}, {self.c.__str__()})"
+
+class Vector:
+    def __init__(self, dr, dc):
+        self.dr = dr
+        self.dc = dc
+
+    def __add__(self, vec):
+        try:
+            return Vector(self.dr + vec.dr, self.dc + vec.dc)
+        except AttributeError:
+            return NotImplemented
+
+    def __sub__(self, vec): return Vector(self.dr - vec.dr, self.dc - vec.dc)
+    def __rsub__(self, pos): return Position(pos.r - self.dr, pos.c - self.dc)
+
+    def __truediv__(self, alpha): return Vector(self.dr / alpha, self.dc / alpha)
+    def __mul__(self, alpha): return Vector(self.dr * alpha, self.dc * alpha)
+    __rmul__ = __mul__
+
+    def __neg__(self): return Vector(-self.dr, -self.dc)
+
+    def __repr__(self): return f"Vector({self.dr.__repr__()}, {self.dc.__repr__()})"
+    def __str__(self): return f"({self.dr.__str__()}, {self.dc.__str__()})"
+
+class Extent:
+    def __init__(self, sprite_size):
+        self._template_size = None
+        self._sprite_size = sprite_size
+
+    def set_template_size(self, size):
+        if self._template_size is None:
+            self._template_size = size
+        assert(self._template_size == size)
+
+    def pixel(self): return self._sprite_size/8
+    def sprite(self): return self._sprite_size
+    def screen(self): return self._template_size * self.pixel()
+    def screen_midpoint(self): return self.screen()/2
+
+    def pixel_approx(self): return math.floor(self.pixel())
+    def sprite_approx(self): return math.floor(self.sprite())
+    def screen_approx(self): return math.floor(self.screen())
+    def screen_midpoint_approx(self): return self.screen_approx()//2
+
+class Grid:
+    def __init__(self, h, w):
+        self.h = Extent(h)
+        self.w = Extent(w)
+        self._unscaled_template = None
+        self._colors = None
+        self._mask = None
+
+    def pixel(self): return Vector(self.h.pixel(), self.w.pixel())
+    def sprite(self): return Vector(self.h.sprite(), self.w.sprite())
+    def screen(self): return Vector(self.h.screen(), self.w.screen())
+    def screen_midpoint(self): return Vector(self.h.screen_midpoint(), self.w.screen_midpoint())
+
+    def pixel_approx(self): return Vector(self.h.pixel_approx(), self.w.pixel_approx())
+    def sprite_approx(self): return Vector(self.h.sprite_approx(), self.w.sprite_approx())
+    def screen_approx(self): return Vector(self.h.screen_approx(), self.w.screen_approx())
+    def screen_midpoint_approx(self): return Vector(self.h.screen_midpoint_approx(), self.w.screen_midpoint_approx())
+
+    def unscaled_template(self): return Vector(self._colors.shape[0], self._colors.shape[1])
+    def sprite_width(self): return Vector(0, self.w.sprite())
+    def sprite_height(self): return Vector(self.h.sprite(), 0)
+
+    def set_unscaled_template(self, template):
+        self._unscaled_template = template
+        h, w, _ = template.shape
+        self.h.set_template_size(h)
+        self.w.set_template_size(w)
+        template = cv2.resize(template, (self.w.screen_approx(), self.h.screen_approx()), interpolation=cv2.INTER_NEAREST)
+        self._colors = template[:, :, :3]
+        self._mask = template[:, :, 3]
+        return self
+
+    def best_screen_raw(self, frame, origin=Position(0, 0)):
+        scores = cv2.matchTemplate(frame, self._colors, cv2.TM_SQDIFF, mask=self._mask)
+        dr, dc = np.unravel_index(np.argmin(scores), scores.shape)
+        return Screen(origin + Vector(dr, dc), self, scores[dr, dc])
+
+    def best_screen_pad(self, frame):
+        padh = self.h.screen_midpoint_approx()
+        padw = self.w.screen_midpoint_approx()
+        padded = np.pad(frame, ((padh, padh), (padw, padw), (0, 0)))
+        return self.best_screen_raw(padded, Position(-padh, -padw))
+
+    def best_screen_like(self, screen, frame):
+        if self._unscaled_template is None:
+            self.set_unscaled_template(screen.grid._unscaled_template)
+        origin = (screen.midpoint_approx() - self.screen_midpoint() - self.sprite() / 2).snap()
+        extent = self.screen() + self.sprite()
+        padded = pad_slice(frame, ((origin.r, math.ceil(extent.dr)), (origin.c, math.ceil(extent.dc)), (0, 3)))
+        return self.best_screen_raw(padded, origin)
+
+class Screen:
+    def __init__(self, top_left, grid, score):
+        self.top_left = top_left
+        self.grid = grid
+        self.score = score
+
+    def midpoint_approx(self): return self.top_left + self.grid.screen_midpoint_approx()
+
+    def extract_raw(self, frame, top_left, unscaled_size, scaled_size):
+        tl = top_left.snap()
+        br = (top_left + unscaled_size).snap() - tl
+        unscaled = pad_slice(frame, ((tl.r, br.dr), (tl.c, br.dc), (0, 3)))
+        return cv2.resize(unscaled, (scaled_size.dc, scaled_size.dr), interpolation=cv2.INTER_CUBIC)
+
+    def extract_screen(self, frame):
+        return self.extract_raw(frame, self.top_left, self.grid.screen(), ZOOM*self.grid.unscaled_template())
+
+    def extract_1p_board(self, frame):
+        h = self.grid.sprite_height()
+        w = self.grid.sprite_width()
+        return self.extract_raw(frame, self.top_left + 12*w + 9*h, 8*w + 16*h, ZOOM*8*Vector(16, 8))
+
+    def render(self, frame, origin=Position(0, 0)):
+        frame = np.copy(frame)
+        color = (0, 255, 0)
+
+        top_left = self.top_left - origin
+        bottom_right = top_left + self.grid.screen_approx() - Vector(1, 1)
+        cv2.rectangle(frame, (top_left.dc, top_left.dr), (bottom_right.dc, bottom_right.dr), color, 1)
+
+        midpoint = self.midpoint_approx() - origin
+        cv2.line(frame, (midpoint.dc-3, midpoint.dr), (midpoint.dc+3, midpoint.dr), color, 1)
+        cv2.line(frame, (midpoint.dc, midpoint.dr-3), (midpoint.dc, midpoint.dr+3), color, 1)
+
+        dr_sprite = self.grid.sprite().dr
+        dc_sprite = self.grid.sprite().dc
+        bottom_right = (Position(0, 0) + top_left + Vector(25 * dr_sprite, 20 * dc_sprite)).snap()
+        top_left = (Position(0, 0) + top_left + Vector(9 * dr_sprite, 12 * dc_sprite)).snap()
+        cv2.rectangle(frame, (top_left.c, top_left.r), (bottom_right.c, bottom_right.r), color, 1)
+
+        return frame
+
 # This works in BGR space. I also experimented with working in LAB space, but
 # this is a bit faster and the results are only marginally different.
 class Posterizer:
@@ -233,21 +408,19 @@ video_in = cv2.VideoCapture(filename)
 video_fps = video_in.get(cv2.CAP_PROP_FPS)
 video_out = None
 success, frame = video_in.read()
-grid = detect_grid(frame)
-tmpl = resize_template(template, grid[0])
-scores = score_positions(frame, tmpl)
+h_estimate, w_estimate = estimate_grid_size(frame)
+screen_estimate = Grid(h_estimate.best, w_estimate.best).set_unscaled_template(template).best_screen_pad(frame)
 
-y, x = np.unravel_index(np.argmin(scores), scores.shape)
-h, w, _ = tmpl.shape
-x -= w//2
-y -= h//2
+def score_hw_candidate(h_candidate, w_candidate):
+    return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
+bh, bw = grid_search(score_hw_candidate, h_estimate.lo, h_estimate.hi, w_estimate.lo, w_estimate.hi)
+best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
 
 frame_number = 0
 start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 
 while success:
-    screen = cv2.resize(pad_slice(frame, ((y,h), (x,w), (0,3))), (ZOOM*template.shape[1], ZOOM*template.shape[0]), interpolation=cv2.INTER_CUBIC)
-    board = screen[9*ZOOMED_SPRITE_SIZE:25*ZOOMED_SPRITE_SIZE,12*ZOOMED_SPRITE_SIZE:20*ZOOMED_SPRITE_SIZE,:]
+    board = best_screen.extract_1p_board(frame)
     poster_index = posterizer.bgr2indexed(board)
     tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
     sprites = np.argmin(np.sum(np.choose(tiles, sprite_distances), (3,4)), 2)
