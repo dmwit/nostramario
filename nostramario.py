@@ -8,19 +8,8 @@ import time
 
 def lerp(lo, hi, progress): return lo*(1-progress)+hi*progress
 
-class Estimate:
-    def __init__(self, lo, best, hi):
-        self.lo = lo
-        self.best = best
-        self.hi = hi
-
-    def lrange(self, n):
-        for i in range(n):
-            frac = i/(n-1)
-            yield self.lo*frac + self.hi*(1 - frac)
-
-def division_estimate(num, denom, ddenom):
-    return Estimate(num/(denom+ddenom), num/denom, num/(denom-ddenom))
+def division_estimate(num, denom):
+    return (num/(denom+1), num/denom, num/(denom-1))
 
 def estimate_grid_size(img):
     rgb = np.uint32(img)
@@ -36,7 +25,7 @@ def estimate_grid_size(img):
     folded[:rs//224+1,:] = -float('inf')
     folded[:,:cs//256+1] = -float('inf')
     rmax, cmax = np.unravel_index(np.argmax(folded), folded.shape)
-    return (division_estimate(rs/2, rmax+1, 1), division_estimate(cs/2, cmax+1, 1))
+    return (division_estimate(rs/2, rmax+1), division_estimate(cs/2, cmax+1))
 
 def grid_search(f, xlo, xhi, ylo, yhi, resolution=2):
     scores = np.zeros((resolution, resolution))
@@ -332,12 +321,12 @@ video_in = cv2.VideoCapture(filename)
 video_fps = video_in.get(cv2.CAP_PROP_FPS)
 video_out = None
 success, frame = video_in.read()
-h_estimate, w_estimate = estimate_grid_size(frame)
-screen_estimate = Grid(h_estimate.best, w_estimate.best).set_unscaled_template(template).best_screen_pad(frame)
+(h_lo, h_best, h_hi), (w_lo, w_best, w_hi) = estimate_grid_size(frame)
+screen_estimate = Grid(h_best, w_best).set_unscaled_template(template).best_screen_pad(frame)
 
 def score_hw_candidate(h_candidate, w_candidate):
     return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
-bh, bw = grid_search(score_hw_candidate, h_estimate.lo, h_estimate.hi, w_estimate.lo, w_estimate.hi)
+bh, bw = grid_search(score_hw_candidate, h_lo, h_hi, w_lo, w_hi)
 best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
 
 frame_number = 0
