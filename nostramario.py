@@ -54,6 +54,10 @@ SPRITE_SIZE=8
 ZOOM=3
 ZOOMED_SPRITE_SIZE=ZOOM*SPRITE_SIZE
 OCCUPATION_THRESHOLD=50
+BOARD_ROW_OFFSET_1P = 9
+BOARD_COL_OFFSET_1P = 12
+BOARD_WIDTH = 8
+BOARD_HEIGHT = 16
 
 def open_sprites(directory):
     sprite_dict = {file: np.uint8(Image.open(file).convert())[:, :, [2,1,0]] for file in pathlib.Path(directory).iterdir()}
@@ -150,7 +154,7 @@ class Extent:
             self._template_size = size
         assert(self._template_size == size)
 
-    def pixel(self): return self._sprite_size/8
+    def pixel(self): return self._sprite_size/SPRITE_SIZE
     def sprite(self): return self._sprite_size
     def screen(self): return self._template_size * self.pixel()
     def screen_midpoint(self): return self.screen()/2
@@ -231,7 +235,11 @@ class Screen:
     def extract_1p_board(self, frame):
         h = self.grid.sprite_height()
         w = self.grid.sprite_width()
-        return self.extract_raw(frame, self.top_left + 12*w + 9*h, 8*w + 16*h, ZOOM*8*Vector(16, 8))
+        return self.extract_raw(frame,
+            self.top_left + BOARD_COL_OFFSET_1P*w + BOARD_ROW_OFFSET_1P*h,
+            BOARD_WIDTH*w + BOARD_HEIGHT*h,
+            ZOOMED_SPRITE_SIZE*Vector(BOARD_HEIGHT, BOARD_WIDTH)
+            )
 
     def render(self, frame, origin=Position(0, 0)):
         frame = np.copy(frame)
@@ -247,8 +255,8 @@ class Screen:
 
         dr_sprite = self.grid.sprite().dr
         dc_sprite = self.grid.sprite().dc
-        bottom_right = (Position(0, 0) + top_left + Vector(25 * dr_sprite, 20 * dc_sprite)).snap()
-        top_left = (Position(0, 0) + top_left + Vector(9 * dr_sprite, 12 * dc_sprite)).snap()
+        bottom_right = (Position(0, 0) + top_left + Vector((BOARD_ROW_OFFSET_1P + BOARD_HEIGHT) * dr_sprite, (BOARD_COL_OFFSET_1P + BOARD_WIDTH) * dc_sprite)).snap()
+        top_left = (Position(0, 0) + top_left + Vector(BOARD_ROW_OFFSET_1P * dr_sprite, BOARD_COL_OFFSET_1P * dc_sprite)).snap()
         cv2.rectangle(frame, (top_left.c, top_left.r), (bottom_right.c, bottom_right.r), color, 1)
 
         return frame
