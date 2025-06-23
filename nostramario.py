@@ -1,34 +1,12 @@
 from PIL import Image
-from PIL import ImageDraw
-from skimage import color
 import cv2
 import math
 import numpy as np
 import pathlib
-import skimage
 import sys
 import time
 
-def log_clip(arr): return np.log(np.maximum(arr,1e-100))
-def rescale_255(arr):
-    lo = np.min(arr)
-    hi = np.max(arr)
-    return np.uint8((arr-lo)/(hi-lo)*255.99)
-def array_img(arr): return Image.fromarray(rescale_255(arr))
-def log_array_img(arr): return Image.fromarray(rescale_255(log_clip(arr)))
-def sq(x): return x*x
 def lerp(lo, hi, progress): return lo*(1-progress)+hi*progress
-def circle_lerp(lo, hi, progress):
-    if abs(hi-lo) < math.pi: return lerp(lo, hi, progress)
-    return lerp(lo, hi-2*math.pi, progress)
-def arr_circle_lerp(arr, ix):
-    return circle_lerp(arr[math.floor(ix)], arr[math.ceil(ix)], ix-math.floor(ix))
-def quad_max(xs, ys):
-    def alpha(y0, x0, x1, x2): return y0/(x0-x1)/(x0-x2)
-    x0, x1, x2 = xs
-    y0, y1, y2 = ys
-    a0, a1, a2 = alpha(y0, x0, x1, x2), alpha(y1, x1, x0, x2), alpha(y2, x2, x0, x1)
-    return (x0*a1+x0*a2+x1*a0+x1*a2+x2*a0+x2*a1)/2/(a0+a1+a2)
 
 class Estimate:
     def __init__(self, lo, best, hi):
@@ -99,17 +77,6 @@ def open_sprites(directory):
         i += 1
     return sprite_names, sprite_arr
 
-def score_positions(img, template):
-    pad0 = template.shape[0]//2
-    pad1 = template.shape[1]//2
-    padded = np.pad(img, ((pad0, pad0), (pad1, pad1), (0, 0)))
-    mask = template[:, :, 3]
-    template = template[:, :, :3]
-    return cv2.matchTemplate(padded, template, cv2.TM_SQDIFF, mask=mask)
-
-def resize_template(template, grid_size):
-    return cv2.resize(template, (math.floor(grid_size[1]/8*template.shape[1]), math.floor(grid_size[0]/8*template.shape[0])), interpolation=cv2.INTER_NEAREST)
-
 def vstack(arrs):
     if not arrs: return np.zeros((0,))
     shape = tuple(map(max, zip(*[arr.shape for arr in arrs])))
@@ -141,35 +108,6 @@ def pad_slice(arr, slices):
         shifted_slices.append(slice(lo+pad_lo,lo+pad_lo+slice_sz))
     #print("shape:", arr.shape, "; slices:", slices, "; computed padding:", padding, "; shifted slices:", shifted_slices)
     return np.pad(arr, padding)[*shifted_slices]
-
-def id_transform(arr): return arr
-def lab_transform(arr): return skimage.color.rgb2lab(np.flip(np.uint8(arr), -1))
-def ab_transform(arr): return lab_transform(arr)[..., 1:3]
-def phase_magnitude_transform(arr):
-    fft = np.fft.fft2(arr, axes=(-3,-2))
-    return np.concatenate([np.angle(fft), np.abs(fft)], -1)
-def real_imaginary_transform(arr):
-    fft = np.fft.fft2(arr, axes=(-3,-2))
-    return np.concatenate([np.real(fft), np.imag(fft)], -1)
-def phase_transform(arr): return np.angle(np.fft.fft2(arr, axes=(-3,-2)))
-def magnitude_transform(arr): return np.abs(np.fft.fft2(arr, axes=(-3,-2)))
-def safe_log_transform(arr): return np.log(np.fmax(arr, 1e-10))
-def compose_transform(t1, t2): return lambda arr: t1(t2(arr))
-all_transforms = [
-    (id_transform, "id"),
-    (lab_transform, "lab"),
-    #(ab_transform, "ab"),
-    #(phase_magnitude_transform, "phase+magnitude"),
-    #(real_imaginary_transform, "real+imaginary"),
-    #(phase_transform, "phase"),
-    #(magnitude_transform, "magnitude"),
-    #(compose_transform(safe_log_transform, magnitude_transform), "log.magnitude"),
-    #(compose_transform(phase_magnitude_transform, lab_transform), "phase+magnitude.lab"),
-    #(compose_transform(real_imaginary_transform, lab_transform), "real+imaginary.lab"),
-    #(compose_transform(phase_transform, lab_transform), "phase.lab"),
-    #(compose_transform(magnitude_transform, lab_transform), "magnitude.lab"),
-    #(compose_transform(compose_transform(safe_log_transform, magnitude_transform), lab_transform), "log.magnitude.lab"),
-    ]
 
 class Position:
     def __init__(self, r, c):
@@ -357,20 +295,6 @@ class Posterizer:
 
     def indexed2bgr(self, indexes): return self._zbgrs[indexes, :]
     def bgr2bgr(self, bgr): return self.indexed2bgr(self.bgr2indexed(bgr))
-
-# probably too smart for its own good
-def from_grayscale(arr):
-    if np.all(0 <= arr) and np.all(arr <= 1):
-        arr = 255.99*arr
-    if arr.dtype in [np.float16, np.float32, np.float64, np.float128]:
-        arr = np.uint8(arr)
-    return np.repeat(arr[..., np.newaxis], 3, -1)
-
-def add_to_key(d, k, v):
-    try:
-        d[k].add(v)
-    except KeyError:
-        d[k] = set([v])
 
 # arr.shape = (num_sprites, sprite_height, sprite_width)
 # arr.dtype = uint8
