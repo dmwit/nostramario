@@ -319,11 +319,16 @@ def distance_field(arr):
 
     return overscan[:, :, h-1:2*h-1, w-1:2*w-1]
 
+print("Preprocessing reference images", end="", flush=True)
+start = time.time()
 template = open_template("1p-hi-masked.png")
 sprite_names, sprite_arr = open_sprites("sprites")
 posterizer = Posterizer(sprite_arr)
 sprite_distances = distance_field(posterizer.bgr2indexed(sprite_arr[0, 0]))
+print("", time.time() - start, "s")
 
+print("Estimating game screen location", end="", flush=True)
+start = time.time()
 filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
 video_in = cv2.VideoCapture(filename)
 video_fps = video_in.get(cv2.CAP_PROP_FPS)
@@ -331,12 +336,21 @@ video_out = None
 success, frame = video_in.read()
 (h_lo, h_best, h_hi), (w_lo, w_best, w_hi) = estimate_grid_size(frame)
 screen_estimate = Grid(h_best, w_best).set_unscaled_template(template).best_screen_pad(frame)
+print("", time.time() - start, "s")
 
+print("Refining game screen location estimate", end="", flush=True)
+start = time.time()
+score_count = 0
 def score_hw_candidate(h_candidate, w_candidate):
+    global score_count
+    score_count += 1
+    if score_count & 3 == 0: print(".", end="", flush=True)
     return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
 bh, bw = grid_search(score_hw_candidate, h_lo, h_hi, w_lo, w_hi)
 best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
+print("", time.time() - start, "s")
 
+print("Processing video")
 frame_number = 0
 start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
 
