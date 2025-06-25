@@ -61,12 +61,12 @@ BOARD_HEIGHT = 16
 
 def open_sprites(directory):
     sprite_dict = {file: np.uint8(Image.open(file).convert())[:, :, [2,1,0]] for file in pathlib.Path(directory).iterdir()}
-    sprite_arr = np.zeros((1,1,len(sprite_dict),ZOOMED_SPRITE_SIZE,ZOOMED_SPRITE_SIZE,3), np.int32)
+    sprite_arr = np.zeros((len(sprite_dict),ZOOMED_SPRITE_SIZE,ZOOMED_SPRITE_SIZE,3), np.int32)
     sprite_names = []
     i = 0
     for name, arr in sprite_dict.items():
         sprite_names.append(name.with_suffix("").name)
-        sprite_arr[0, 0, i, :, :, :] = np.repeat(np.repeat(arr, ZOOM, 0), ZOOM, 1)
+        sprite_arr[i] = np.repeat(np.repeat(arr, ZOOM, 0), ZOOM, 1)
         i += 1
     return sprite_names, sprite_arr
 
@@ -271,7 +271,7 @@ class Posterizer:
         bgrs = set()
         minl = float('inf')
         for i in range(bgr.shape[0]):
-            cur_bgr = tuple(bgr[i, :])
+            cur_bgr = tuple(bgr[i])
             l = sum(cur_bgr)
             if l > 0 and cur_bgr not in bgrs:
                 bgrs.add(cur_bgr)
@@ -290,7 +290,7 @@ class Posterizer:
     def bgr2indexed(self, bgr):
         return np.where(np.sum(bgr, -1) <= self._lthreshold, 0, 1 + np.argmin(np.sum(np.square(np.expand_dims(bgr, -2) - self._bgrs), -1), -1))
 
-    def indexed2bgr(self, indexes): return self._zbgrs[indexes, :]
+    def indexed2bgr(self, indexes): return self._zbgrs[indexes]
     def bgr2bgr(self, bgr): return self.indexed2bgr(self.bgr2indexed(bgr))
 
 # arr.shape = (num_sprites, sprite_height, sprite_width)
@@ -324,7 +324,7 @@ start = time.time()
 template = open_template("1p-hi-masked.png")
 sprite_names, sprite_arr = open_sprites("sprites")
 posterizer = Posterizer(sprite_arr)
-sprite_distances = distance_field(posterizer.bgr2indexed(sprite_arr[0, 0]))
+sprite_distances = distance_field(posterizer.bgr2indexed(sprite_arr))
 print("", time.time() - start, "s")
 
 print("Estimating game screen location", end="", flush=True)
@@ -361,7 +361,7 @@ while success:
     sprites = np.argmin(np.sum(np.choose(tiles, sprite_distances), (3,4)), 2)
     frame_components = [board]
     for row in sprites:
-        frame_components.append(np.concatenate(sprite_arr[0, 0, row], 1))
+        frame_components.append(np.concatenate(sprite_arr[row], 1))
 
     frame_height = sum(arr.shape[0] for arr in frame_components)
     frame_width = max(arr.shape[1] for arr in frame_components)
@@ -377,7 +377,7 @@ while success:
     frame = np.uint8(vstack(frame_components))
     if frame.shape[0] > video_height or frame.shape[1] > video_width:
         print("WARNING: large frame", frame_number, "(expected ", video_width, "x", video_height, ", but saw", frame.shape[1], "x", frame.shape[0], ")")
-        frame = frame[:video_height, :video_width, :]
+        frame = frame[:video_height, :video_width]
 
     video_out.write(frame)
     end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
