@@ -327,63 +327,65 @@ posterizer = Posterizer(sprite_arr)
 sprite_distances = distance_field(posterizer.bgr2indexed(sprite_arr))
 print("", time.time() - start, "s")
 
-print("Estimating game screen location", end="", flush=True)
-start = time.time()
-filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
-video_in = cv2.VideoCapture(filename)
-video_fps = video_in.get(cv2.CAP_PROP_FPS)
-video_out = None
-success, frame = video_in.read()
-(h_lo, h_best, h_hi), (w_lo, w_best, w_hi) = estimate_grid_size(frame)
-screen_estimate = Grid(h_best, w_best).set_unscaled_template(template).best_screen_pad(frame)
-print("", time.time() - start, "s")
-
-print("Refining game screen location estimate", end="", flush=True)
-start = time.time()
-score_count = 0
-def score_hw_candidate(h_candidate, w_candidate):
-    global score_count
-    score_count += 1
-    if score_count & 3 == 0: print(".", end="", flush=True)
-    return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
-bh, bw = grid_search(score_hw_candidate, h_lo, h_hi, w_lo, w_hi)
-best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
-print("", time.time() - start, "s")
-
-print("Processing video")
-frame_number = 0
-start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-
-while success:
-    board = best_screen.extract_1p_board(frame)
-    poster_index = posterizer.bgr2indexed(board)
-    tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
-    sprites = np.argmin(np.sum(np.choose(tiles, sprite_distances), (3,4)), 2)
-    frame_components = [board]
-    for row in sprites:
-        frame_components.append(np.concatenate(sprite_arr[row], 1))
-
-    frame_height = sum(arr.shape[0] for arr in frame_components)
-    frame_width = max(arr.shape[1] for arr in frame_components)
-
-    if video_out is None:
-        video_height = frame_height
-        video_width = frame_width
-        video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
-
-    if frame_height < video_height:
-        print("WARNING: small frame", frame_number, "(expected height", video_height, ", but saw", frame_height, ")")
-        frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
-    frame = np.uint8(vstack(frame_components))
-    if frame.shape[0] > video_height or frame.shape[1] > video_width:
-        print("WARNING: large frame", frame_number, "(expected ", video_width, "x", video_height, ", but saw", frame.shape[1], "x", frame.shape[0], ")")
-        frame = frame[:video_height, :video_width]
-
-    video_out.write(frame)
-    end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-    print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
-
+for filename in sys.argv[1:]:
+    progress_summary = f' ({filename})' if len(sys.argv) > 2 else ''
+    print(f"Estimating game screen location", end=progress_summary, flush=True)
+    start = time.time()
+    filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
+    video_in = cv2.VideoCapture(filename)
+    video_fps = video_in.get(cv2.CAP_PROP_FPS)
+    video_out = None
     success, frame = video_in.read()
-    frame_number += 1
-print("")
-if video_out is not None: video_out.release()
+    (h_lo, h_best, h_hi), (w_lo, w_best, w_hi) = estimate_grid_size(frame)
+    screen_estimate = Grid(h_best, w_best).set_unscaled_template(template).best_screen_pad(frame)
+    print("", time.time() - start, "s")
+
+    print(f"Refining game screen location estimate", end=progress_summary, flush=True)
+    start = time.time()
+    score_count = 0
+    def score_hw_candidate(h_candidate, w_candidate):
+        global score_count
+        score_count += 1
+        if score_count & 3 == 0: print(".", end="", flush=True)
+        return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
+    bh, bw = grid_search(score_hw_candidate, h_lo, h_hi, w_lo, w_hi)
+    best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
+    print("", time.time() - start, "s")
+
+    print(f"Processing video{progress_summary}")
+    frame_number = 0
+    start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+
+    while success:
+        board = best_screen.extract_1p_board(frame)
+        poster_index = posterizer.bgr2indexed(board)
+        tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
+        sprites = np.argmin(np.sum(np.choose(tiles, sprite_distances), (3,4)), 2)
+        frame_components = [board]
+        for row in sprites:
+            frame_components.append(np.concatenate(sprite_arr[row], 1))
+
+        frame_height = sum(arr.shape[0] for arr in frame_components)
+        frame_width = max(arr.shape[1] for arr in frame_components)
+
+        if video_out is None:
+            video_height = frame_height
+            video_width = frame_width
+            video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
+
+        if frame_height < video_height:
+            print("WARNING: small frame", frame_number, "(expected height", video_height, ", but saw", frame_height, ")")
+            frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
+        frame = np.uint8(vstack(frame_components))
+        if frame.shape[0] > video_height or frame.shape[1] > video_width:
+            print("WARNING: large frame", frame_number, "(expected ", video_width, "x", video_height, ", but saw", frame.shape[1], "x", frame.shape[0], ")")
+            frame = frame[:video_height, :video_width]
+
+        video_out.write(frame)
+        end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+        print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
+
+        success, frame = video_in.read()
+        frame_number += 1
+    print("")
+    if video_out is not None: video_out.release()
