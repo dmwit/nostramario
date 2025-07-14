@@ -1,3 +1,4 @@
+from enum import Enum
 from PIL import Image
 import cv2
 import math
@@ -59,16 +60,12 @@ BOARD_COL_OFFSET_1P = 12
 BOARD_WIDTH = 8
 BOARD_HEIGHT = 16
 
-def open_sprites(directory):
-    sprite_dict = {file: np.uint8(Image.open(file).convert())[:, :, [2,1,0]] for file in pathlib.Path(directory).iterdir()}
-    sprite_arr = np.zeros((len(sprite_dict),ZOOMED_SPRITE_SIZE,ZOOMED_SPRITE_SIZE,3), np.int32)
-    sprite_names = []
-    i = 0
-    for name, arr in sprite_dict.items():
-        sprite_names.append(name.with_suffix("").name)
-        sprite_arr[i] = np.repeat(np.repeat(arr, ZOOM, 0), ZOOM, 1)
-        i += 1
-    return sprite_names, sprite_arr
+def open_sprites(sprites):
+    arr = np.zeros((len(sprites), SPRITE_SIZE, SPRITE_SIZE, 3), np.uint8)
+    for i, sprite in enumerate(sprites):
+        # this is not a np.flip, because we are also optionally discarding the alpha channel
+        arr[i] = np.uint8(Image.open(sprite.image_name()).convert())[..., [2, 1, 0]]
+    return np.repeat(np.repeat(arr, ZOOM, 1), ZOOM, 2)
 
 def vstack(arrs):
     if not arrs: return np.zeros((0,))
@@ -317,75 +314,285 @@ def distance_field(arr):
                 color = arr[sprite, r, c]
                 overscan[color, sprite, r:r+2*h-1, c:c+2*w-1] = np.fmin(overscan[color, sprite, r:r+2*h-1, c:c+2*w-1], stamp)
 
-    return overscan[:, :, h-1:2*h-1, w-1:2*w-1]
+    return np.sum(palette_missing), overscan[:, :, h-1:2*h-1, w-1:2*w-1]
 
-print("Preprocessing reference images", end="", flush=True)
-start = time.time()
-template = open_template("1p-hi-masked.png")
-sprite_names, sprite_arr = open_sprites("sprites")
-posterizer = Posterizer(sprite_arr)
-sprite_distances = distance_field(posterizer.bgr2indexed(sprite_arr))
-print("", time.time() - start, "s")
+class StrategyColor(Enum):
+    BLUE = 0
+    RED = 1
+    YELLOW = 2
+
+    def __init__(self, i):
+        self.image_name = 'bry'[i]
+
+class BoardShape(Enum):
+    VIRUS = 0
+    WEST_HALF_OF_PILL = 1
+    EAST_HALF_OF_PILL = 2
+    NORTH_HALF_OF_PILL = 3
+    SOUTH_HALF_OF_PILL = 4
+    DISCONNECTED = 5
+    CLEARING = 6
+
+    def __init__(self, i):
+        self.image_name = 'xlr^v*o'[i]
+        self.parameters = [None] if i > 4 else [False, True]
+
+class AbstractSprite:
+    CONTROLLABLE = set([BoardShape.WEST_HALF_OF_PILL, BoardShape.EAST_HALF_OF_PILL, BoardShape.NORTH_HALF_OF_PILL, BoardShape.SOUTH_HALF_OF_PILL])
+
+    def __init__(self, color=None, shape=None, misc=None):
+        self.color = color
+        self.shape = shape
+        self.misc = misc
+        summary = \
+            ('k' if color is None else color.image_name) + \
+            (' ' if shape is None else shape.image_name)
+        if shape is BoardShape.VIRUS:
+            summary += '2' if misc else '1'
+        elif shape in self.CONTROLLABLE:
+            summary += 'c' if misc else ''
+        self.summary = summary
+
+    def __eq__(self, other): return self.color == other.color and self.shape == other.shape and self.misc == other.misc
+    def __hash__(self): return hash((self.color, self.shape, self.misc))
+
+    def image_name(self): return f'sprites/{self.summary}.png'
+    def __str__(self): return self.summary
+    def __repr__(self): return f'AbstractSprite(color={self.color}, shape={self.shape}, misc={self.misc})'
+
+all_abstract_sprites = [AbstractSprite()] + [AbstractSprite(color, shape, param) for color in StrategyColor for shape in BoardShape for param in shape.parameters]
+abstract_sprite_indices = {sprite: i for i, sprite in enumerate(all_abstract_sprites)}
+
+def enum_ix(color):
+    return lambda shape, misc: abstract_sprite_indices[AbstractSprite(color=color, shape=shape, misc=misc)]
+
+def str_ix(color):
+    eix = enum_ix(color)
+    # Wow. I feel dirty and brilliant simultaneously.
+    def f(**kwargs):
+        shape_name, misc = next(iter(kwargs.items()))
+        return eix(BoardShape[shape_name], misc)
+    return f
+
+def transition_weights(temperature):
+    FRAMES_PER_RUN = 40*60*60
+    PILLS_PER_RUN = 2300
+    VIRUSES_PER_RUN = 924
+    ROTATIONS_PER_PILL = 3
+    DROPS_PER_PILL = 10
+    SLIDES_PER_PILL = 4
+    MOVES_PER_PILL = ROTATIONS_PER_PILL + DROPS_PER_PILL + SLIDES_PER_PILL
+    CLEARS_PER_RUN = 600
+    CELLS_PER_CLEAR = 5
+    FRAMES_PER_VIRUS_ANIMATION = 8
+    MEAN_FRAMES_PER_CLEAR_ANIMATION = 18
+    MEAN_VIRUSES_VISIBLE = 3835/132 # assumptions: every virus takes the same time to clear, 0-20, only gameplay (not cutscenes)
+    NUM_COLORS = len(StrategyColor)
+    NUM_ORIENTATIONS = 2
+    SLIDE_DIRECTIONS = 2
+    MEAN_PILL_HALVES_VISIBLE = 15
+    BOARD_SPACES = 8*16
+    FALLING_TRANSITIONS_PER_PAIR = CLEARS_PER_RUN / NUM_COLORS / 2 # dunno lol
+    CONNECTED_PILL_HALVES = (BoardShape.WEST_HALF_OF_PILL, BoardShape.NORTH_HALF_OF_PILL, BoardShape.SOUTH_HALF_OF_PILL, BoardShape.EAST_HALF_OF_PILL)
+    ALL_PILL_HALVES = (BoardShape.DISCONNECTED,) + CONNECTED_PILL_HALVES
+
+    # We will try to fill ws[tgt, src] with an estimate of many times a src
+    # sprite turns into a tgt sprite in a typical 0-20 run. But we'll start
+    # with a nonzero everywhere so that we don't rule any transitions out
+    # completely -- who knows if somebody's trying to use this on a DM variant
+    # or something.
+    ws = np.ones((len(all_abstract_sprites), len(all_abstract_sprites)), dtype=np.float64)
+    empty_ix = abstract_sprite_indices[AbstractSprite()]
+
+    for color in StrategyColor:
+        eix = enum_ix(color)
+        six = str_ix(color)
+
+        ws[empty_ix, empty_ix] = (BOARD_SPACES - MEAN_VIRUSES_VISIBLE - MEAN_PILL_HALVES_VISIBLE) * FRAMES_PER_RUN
+        ws[six(VIRUS=False), empty_ix] = VIRUSES_PER_RUN / NUM_COLORS / 2
+        ws[six(VIRUS=True), empty_ix] = VIRUSES_PER_RUN / NUM_COLORS / 2
+        for shape in ALL_PILL_HALVES:
+            ws[eix(shape, shape.parameters[0]), empty_ix] = FALLING_TRANSITIONS_PER_PAIR
+        for shape in CONNECTED_PILL_HALVES:
+            ws[eix(shape, True), empty_ix] = PILLS_PER_RUN * MOVES_PER_PILL / NUM_COLORS / NUM_ORIENTATIONS
+
+        for misc in [False, True]:
+            src = six(VIRUS=misc)
+            # /2 because half go to the `not misc` variant
+            animation_toggles = MEAN_VIRUSES_VISIBLE / NUM_COLORS * FRAMES_PER_RUN / FRAMES_PER_VIRUS_ANIMATION / 2
+            ws[src, src] = (FRAMES_PER_VIRUS_ANIMATION - 1) * animation_toggles
+            ws[six(VIRUS=not misc), src] = animation_toggles
+            ws[six(CLEARING=None), src] = CLEARS_PER_RUN / NUM_COLORS / 2
+
+        for i, shape in enumerate(ALL_PILL_HALVES):
+            src = eix(shape, shape.parameters[0])
+            ws[six(DISCONNECTED=None), src] = 2 * CLEARS_PER_RUN / NUM_COLORS
+            ws[six(CLEARING=None), src] = 2 * CLEARS_PER_RUN / NUM_COLORS
+            # intentionally overwrites ws[six(DISCONNECTED=None), src]
+            # assignment from above when shape = DISCONNECTED
+            ws[src, src] = FRAMES_PER_RUN * MEAN_PILL_HALVES_VISIBLE / NUM_COLORS / len(ALL_PILL_HALVES)
+
+            # when stuff is falling
+            ws[empty_ix, src] = FALLING_TRANSITIONS_PER_PAIR
+            for shape_above in ALL_PILL_HALVES:
+                for color_above in StrategyColor:
+                    tgt = abstract_sprite_indices[AbstractSprite(color=color_above, shape=shape_above, misc=shape_above.parameters[0])]
+                    ws[tgt, src] += FALLING_TRANSITIONS_PER_PAIR
+
+        for shape in CONNECTED_PILL_HALVES:
+            src = eix(shape, True)
+            ws[src, src] = (FRAMES_PER_RUN - PILLS_PER_RUN * MOVES_PER_PILL) / NUM_COLORS / len(CONNECTED_PILL_HALVES) * 2
+            ws[eix(shape, False), src] = PILLS_PER_RUN / NUM_COLORS / NUM_ORIENTATIONS
+
+        sliding = PILLS_PER_RUN * SLIDES_PER_PILL / NUM_COLORS / NUM_ORIENTATIONS / SLIDE_DIRECTIONS
+        dropping = PILLS_PER_RUN * DROPS_PER_PILL / NUM_COLORS / NUM_ORIENTATIONS
+        slide_rotating = PILLS_PER_RUN * (SLIDES_PER_PILL + ROTATIONS_PER_PILL) / 10 / NUM_COLORS / NUM_ORIENTATIONS / SLIDE_DIRECTIONS
+        rare = PILLS_PER_RUN / NUM_COLORS / NUM_ORIENTATIONS / 100 # rare, but not so rare as using a DM variant
+        rotating = PILLS_PER_RUN * ROTATIONS_PER_PILL / NUM_COLORS / NUM_ORIENTATIONS
+
+        src = six(WEST_HALF_OF_PILL=True)
+        ws[empty_ix, src] = sliding + dropping
+        ws[six(EAST_HALF_OF_PILL=True), src] = sliding
+        ws[six(NORTH_HALF_OF_PILL=True), src] = rare
+        ws[six(SOUTH_HALF_OF_PILL=True), src] = rotating
+
+        src = six(EAST_HALF_OF_PILL=True)
+        ws[empty_ix, src] = sliding + dropping
+        ws[six(WEST_HALF_OF_PILL=True), src] = sliding
+        ws[six(NORTH_HALF_OF_PILL=True), src] = rare
+        ws[six(SOUTH_HALF_OF_PILL=True), src] = slide_rotating
+
+        src = six(NORTH_HALF_OF_PILL=True)
+        ws[empty_ix, src] = sliding + sliding + dropping
+
+        src = six(SOUTH_HALF_OF_PILL=True)
+        ws[empty_ix, src] = sliding + sliding
+        ws[six(WEST_HALF_OF_PILL=True), src] = rotating
+        ws[six(EAST_HALF_OF_PILL=True), src] = slide_rotating
+        ws[six(NORTH_HALF_OF_PILL=True), src] = dropping
+
+        src = six(CLEARING=None)
+        ws[src, src] = CLEARS_PER_RUN * CELLS_PER_CLEAR * MEAN_FRAMES_PER_CLEAR_ANIMATION / NUM_COLORS
+        ws[empty_ix, src] = CLEARS_PER_RUN * CELLS_PER_CLEAR / NUM_COLORS
+
+    # normalize so that we have probabilities rather than weights
+    ws /= np.sum(ws, 0, keepdims=True)
+
+    # who are you going to believe, your lying eyes or your lying memory?
+    np.power(ws, 1/temperature, out=ws)
+    ws /= np.sum(ws, 0, keepdims=True)
+
+    return ws
+
+def initial_weights():
+    ws = np.ones((len(all_abstract_sprites),))
+    ws[abstract_sprite_indices[AbstractSprite()]] = 100
+    for color in StrategyColor:
+        six = str_ix(color)
+        ws[six(VIRUS=False)] = 5
+        ws[six(VIRUS=True)] = 5
+        ws[six(CLEARING=None)] = 0.1
+    return ws/np.sum(ws)
+
+# Arguments:
+# transitions: NUM_STATES x NUM_STATES, a transition matrix; first dimension is new state, second dimension is old state
+# estimates: ... x NUM_STATES, a distribution on states that's our best guess about the previous time step
+# obs_probs: ... x NUM_STATES, some fixed (but potentially unknown) constant times the probability of the current time step's observation for each state
+#
+# Returns:
+# ... x NUM_STATES, a distribution on states that's our best guess about the current time step
+def hmm_forward(transitions, estimates, obs_probs):
+    estimates = np.squeeze(transitions @ np.expand_dims(estimates, -1), -1) * obs_probs
+    return estimates / np.sum(estimates, -1, keepdims=True)
+
+class Step:
+    def __init__(self, message):
+        self.message = message
+
+    def __enter__(self):
+        print(self.message, end="", flush=True)
+        self.start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+        return self.start_time
+
+    def __exit__(self, *args):
+        print("", time.clock_gettime(time.CLOCK_MONOTONIC) - self.start_time, "s")
+
+with Step("Preprocessing reference images"):
+    template = open_template("1p-hi-masked.png")
+    sprite_images = open_sprites(all_abstract_sprites)
+    posterizer = Posterizer(sprite_images)
+    max_sprite_distance, sprite_distances = distance_field(posterizer.bgr2indexed(sprite_images))
+
+with Step("Generating transition matrix"):
+    transitions = transition_weights(20)
 
 for filename in sys.argv[1:]:
     progress_summary = f' ({filename})' if len(sys.argv) > 2 else ''
-    print(f"Estimating game screen location", end=progress_summary, flush=True)
-    start = time.time()
-    filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
-    video_in = cv2.VideoCapture(filename)
-    video_fps = video_in.get(cv2.CAP_PROP_FPS)
-    video_out = None
-    success, frame = video_in.read()
-    (h_lo, h_best, h_hi), (w_lo, w_best, w_hi) = estimate_grid_size(frame)
-    screen_estimate = Grid(h_best, w_best).set_unscaled_template(template).best_screen_pad(frame)
-    print("", time.time() - start, "s")
 
-    print(f"Refining game screen location estimate", end=progress_summary, flush=True)
-    start = time.time()
-    score_count = 0
-    def score_hw_candidate(h_candidate, w_candidate):
-        global score_count
-        score_count += 1
-        if score_count & 3 == 0: print(".", end="", flush=True)
-        return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
-    bh, bw = grid_search(score_hw_candidate, h_lo, h_hi, w_lo, w_hi)
-    best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
-    print("", time.time() - start, "s")
-
-    print(f"Processing video{progress_summary}")
-    frame_number = 0
-    start_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-
-    while success:
-        board = best_screen.extract_1p_board(frame)
-        poster_index = posterizer.bgr2indexed(board)
-        tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
-        sprites = np.argmin(np.sum(np.choose(tiles, sprite_distances), (3,4)), 2)
-        frame_components = [board]
-        for row in sprites:
-            frame_components.append(np.concatenate(sprite_arr[row], 1))
-
-        frame_height = sum(arr.shape[0] for arr in frame_components)
-        frame_width = max(arr.shape[1] for arr in frame_components)
-
-        if video_out is None:
-            video_height = frame_height
-            video_width = frame_width
-            video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
-
-        if frame_height < video_height:
-            print("WARNING: small frame", frame_number, "(expected height", video_height, ", but saw", frame_height, ")")
-            frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
-        frame = np.uint8(vstack(frame_components))
-        if frame.shape[0] > video_height or frame.shape[1] > video_width:
-            print("WARNING: large frame", frame_number, "(expected ", video_width, "x", video_height, ", but saw", frame.shape[1], "x", frame.shape[0], ")")
-            frame = frame[:video_height, :video_width]
-
-        video_out.write(frame)
-        end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
-        print("frame:", frame_number, "fps:", frame_number/(end_time-start_time), " "*20, end="\r")
-
+    with Step(f"Estimating game screen location{progress_summary}"):
+        filename = sys.argv[1] if len(sys.argv) > 1 else "dmhero-short.mp4"
+        video_in = cv2.VideoCapture(filename)
+        video_fps = video_in.get(cv2.CAP_PROP_FPS)
+        video_out = None
         success, frame = video_in.read()
-        frame_number += 1
-    print("")
-    if video_out is not None: video_out.release()
+        (h_lo, h_best, h_hi), (w_lo, w_best, w_hi) = estimate_grid_size(frame)
+        screen_estimate = Grid(h_best, w_best).set_unscaled_template(template).best_screen_pad(frame)
+
+    with Step(f"Refining game screen location estimate{progress_summary}"):
+        score_count = 0
+        def score_hw_candidate(h_candidate, w_candidate):
+            global score_count
+            score_count += 1
+            if score_count & 3 == 0: print(".", end="", flush=True)
+            return Grid(h_candidate, w_candidate).best_screen_like(screen_estimate, frame).score
+        bh, bw = grid_search(score_hw_candidate, h_lo, h_hi, w_lo, w_hi)
+        best_screen = Grid(bh, bw).best_screen_like(screen_estimate, frame)
+
+    with Step(f"Processing video{progress_summary}\n") as start_time:
+        frame_number = 0
+        estimates = initial_weights() # will get broadcast to a larger size shortly
+        while success:
+            board = best_screen.extract_1p_board(frame)
+            poster_index = posterizer.bgr2indexed(board)
+            tiles = np.lib.stride_tricks.sliding_window_view(poster_index, (ZOOMED_SPRITE_SIZE, ZOOMED_SPRITE_SIZE))[::ZOOMED_SPRITE_SIZE, ::ZOOMED_SPRITE_SIZE, np.newaxis, ...]
+            distances = np.sum(np.choose(tiles, sprite_distances), (3,4))
+            raw_sprites = np.argmin(distances, 2)
+            old_estimates = estimates
+            estimates = hmm_forward(transitions, estimates, max_sprite_distance - distances)
+            forward_sprites = np.argmax(estimates, 2)
+            frame_components = [board]
+            for row in raw_sprites:
+                frame_components.append(np.concatenate(sprite_images[row], 1))
+            for row in forward_sprites:
+                frame_components.append(np.concatenate(sprite_images[row], 1))
+            # for r, row in enumerate(distances):
+            #     for c, col in enumerate(row):
+            #         for i, abstract_sprite in enumerate(all_abstract_sprites):
+            #             o = old_estimates[r,c] if len(old_estimates.shape) > 1 else old_estimates
+            #             print(f"{frame_number:5} {r:2} {c} {abstract_sprite!s:<4}{o[i]:>8.3f} {max_sprite_distance-distances[r,c,i]:>8.3f} {estimates[r,c,i]:>8.3f} {list(transitions[i]*o)}")
+            # print("")
+
+            frame_height = sum(arr.shape[0] for arr in frame_components)
+            frame_width = max(arr.shape[1] for arr in frame_components)
+
+            if video_out is None:
+                video_height = frame_height
+                video_width = frame_width
+                video_out = cv2.VideoWriter(filename + "-with-grid.mp4", cv2.VideoWriter_fourcc(*"mp4v"), video_fps, (video_width, video_height))
+
+            if frame_height < video_height:
+                print("WARNING: small frame", frame_number, "(expected height", video_height, ", but saw", frame_height, ")")
+                frame_components.append(np.zeros((video_height - frame_height, video_width, 3)))
+            frame = np.uint8(vstack(frame_components))
+            if frame.shape[0] > video_height or frame.shape[1] > video_width:
+                print("WARNING: large frame", frame_number, "(expected ", video_width, "x", video_height, ", but saw", frame.shape[1], "x", frame.shape[0], ")")
+                frame = frame[:video_height, :video_width]
+
+            video_out.write(frame)
+            end_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+            print("    frame:", frame_number, "fps:", (frame_number+1)/(end_time-start_time), " "*20, end="\r")
+
+            success, frame = video_in.read()
+            frame_number += 1
+        print("\n   ", end="")
+        if video_out is not None: video_out.release()
